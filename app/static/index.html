@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>회의록 AI</title>
+<style>
+  body { font-family: "Malgun Gothic", sans-serif; max-width: 780px; margin: 24px auto; padding: 0 16px; color: #222; }
+  h1 { color: #1a3b6e; }
+  h2 { color: #2e5c9e; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-top: 28px; }
+  input, textarea, button { font-size: 14px; }
+  input, textarea { width: 100%; padding: 8px; box-sizing: border-box; margin: 4px 0 10px; border: 1px solid #ccc; border-radius: 6px; }
+  textarea { height: 90px; }
+  button { background: #2e5c9e; color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; margin: 2px 4px 2px 0; }
+  button.sub { background: #6b7f9e; }
+  #login-box { max-width: 320px; }
+  .card { background: #f4f7fb; border: 1px solid #dbe3ef; border-radius: 8px; padding: 12px; margin: 10px 0; white-space: pre-wrap; }
+  .hidden { display: none; }
+  .me { color: #555; font-size: 13px; }
+  .row { display: flex; gap: 8px; }
+  .row input { margin-bottom: 0; }
+</style>
+</head>
+<body>
+<h1>회의록 AI</h1>
+
+<div id="login-box">
+  <h2>로그인</h2>
+  <input id="username" placeholder="아이디 (예: acc_user)" />
+  <input id="password" type="password" placeholder="비밀번호 (예: pass1234)" />
+  <button onclick="login()">로그인</button>
+  <div id="login-msg" class="me"></div>
+</div>
+
+<div id="app" class="hidden">
+  <div class="me" id="me"></div>
+
+  <h2>회의록 저장 (마스킹)</h2>
+  <textarea id="content" placeholder="회의 내용을 입력하세요. 예: 김철수 과장에게 010-1234-5678로 연락 바랍니다."></textarea>
+  <button onclick="createTranscript()">저장 &amp; 마스킹</button>
+  <div id="create-result" class="card hidden"></div>
+
+  <h2>작업 (현재 회의록 ID: <span id="current-id">-</span>)</h2>
+  <div class="row">
+    <input id="target-id" placeholder="회의록 ID" style="max-width:120px" />
+    <button class="sub" onclick="analyze()">분석(요약·할일)</button>
+    <button class="sub" onclick="viewPii()">원본 보기(관리자)</button>
+    <button class="sub" onclick="downloadPdf()">PDF 보고서</button>
+    <button class="sub" onclick="listTranscripts()">내 부서 목록</button>
+  </div>
+  <div id="result" class="card hidden"></div>
+</div>
+
+<script>
+let token = null;
+
+function authHeaders(extra) {
+  return Object.assign({ "Authorization": "Bearer " + token }, extra || {});
+}
+
+async function login() {
+  const username = document.getElementById("username").value;
+  const password = document.getElementById("password").value;
+  const res = await fetch("/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ username, password }),
+  });
+  if (!res.ok) {
+    document.getElementById("login-msg").textContent = "로그인 실패 (아이디/비밀번호 확인)";
+    return;
+  }
+  const data = await res.json();
+  token = data.access_token;
+  const me = await (await fetch("/me", { headers: authHeaders() })).json();
+  document.getElementById("me").textContent =
+    `로그인: ${me.username} (부서: ${me.department}, 역할: ${me.role})`;
+  document.getElementById("login-box").classList.add("hidden");
+  document.getElementById("app").classList.remove("hidden");
+}
+
+function showResult(obj) {
+  const el = document.getElementById("result");
+  el.classList.remove("hidden");
+  el.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+}
+
+async function createTranscript() {
+  const content = document.getElementById("content").value;
+  const res = await fetch("/transcripts", {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ content }),
+  });
+  const data = await res.json();
+  const box = document.getElementById("create-result");
+  box.classList.remove("hidden");
+  box.textContent = `저장됨 (ID: ${data.id})\n마스킹 결과: ${data.masked_content}`;
+  document.getElementById("current-id").textContent = data.id;
+  document.getElementById("target-id").value = data.id;
+}
+
+function targetId() {
+  return document.getElementById("target-id").value;
+}
+
+async function analyze() {
+  const res = await fetch(`/transcripts/${targetId()}/analysis`, { headers: authHeaders() });
+  showResult(await res.json());
+}
+
+async function viewPii() {
+  const res = await fetch(`/transcripts/${targetId()}/pii`, { headers: authHeaders() });
+  if (res.status === 403) { showResult("접근 거부: 개인정보 원본은 관리자만 볼 수 있습니다."); return; }
+  showResult(await res.json());
+}
+
+async function listTranscripts() {
+  const res = await fetch("/transcripts", { headers: authHeaders() });
+  showResult(await res.json());
+}
+
+async function downloadPdf() {
+  const id = targetId();
+  const res = await fetch(`/transcripts/${id}/report.pdf`, { headers: authHeaders() });
+  if (!res.ok) { showResult("보고서 생성 실패"); return; }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `report_${id}.pdf`; a.click();
+  URL.revokeObjectURL(url);
+  showResult(`PDF 다운로드 시작: report_${id}.pdf`);
+}
+</script>
+</body>
+</html>
