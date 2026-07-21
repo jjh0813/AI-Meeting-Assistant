@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_admin, get_current_user
+from app.api.deps import get_approved_user, get_current_admin
 from app.core.database import get_db
 from app.models.user import User
 from app.repositories import transcript as transcript_repo
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/transcripts", tags=["transcripts"])
 @router.post("")
 def create_transcript(
     body: TranscriptCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_approved_user),
     db: Session = Depends(get_db),
 ):
     masked_content, pii_items = mask_text(body.content)
@@ -33,7 +33,7 @@ def create_transcript(
 
 @router.get("")
 def list_transcripts(
-    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    current_user: User = Depends(get_approved_user), db: Session = Depends(get_db)
 ):
     transcripts = transcript_repo.list_transcripts(db, current_user)
     return [
@@ -61,7 +61,7 @@ def read_pii(
 @router.get("/{transcript_id}/summary")
 def summarize_transcript(
     transcript_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_approved_user),
     db: Session = Depends(get_db),
 ):
     transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
@@ -74,7 +74,7 @@ def summarize_transcript(
 @router.get("/{transcript_id}/analysis")
 def analyze_transcript(
     transcript_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_approved_user),
     db: Session = Depends(get_db),
 ):
     transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
@@ -91,7 +91,7 @@ def analyze_transcript(
 @router.get("/{transcript_id}/report")
 def get_text_report(
     transcript_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_approved_user),
     db: Session = Depends(get_db),
 ):
     transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
@@ -104,7 +104,7 @@ def get_text_report(
 @router.get("/{transcript_id}/report.pdf")
 def get_pdf_report(
     transcript_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_approved_user),
     db: Session = Depends(get_db),
 ):
     transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
@@ -125,7 +125,7 @@ def get_pdf_report(
 def update_transcript(
     transcript_id: int,
     body: TranscriptCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_approved_user),
     db: Session = Depends(get_db),
 ):
     masked_content, pii_items = mask_text(body.content)
@@ -144,7 +144,7 @@ def update_transcript(
 @router.post("/upload")
 def upload_and_transcribe(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_approved_user),
     db: Session = Depends(get_db),
 ):
     audio_bytes = file.file.read()

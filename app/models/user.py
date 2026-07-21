@@ -17,6 +17,12 @@ class Role(str, enum.Enum):
     admin = "관리자"
 
 
+class Status(str, enum.Enum):
+    pending = "대기"
+    approved = "승인"
+    rejected = "거절"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -25,4 +31,5 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     department = Column(Enum(Department), nullable=False)
     role = Column(Enum(Role), nullable=False, default=Role.member)
+    status = Column(Enum(Status), nullable=False, default=Status.pending)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -1,6 +1,6 @@
 from app.core.database import SessionLocal
 from app.core.security import hash_password
-from app.models.user import Department, Role, User
+from app.models.user import Department, Role, Status, User
 
 USERS = [
     ("acc_user", Department.accounting, Role.member),
@@ -25,6 +25,7 @@ def seed():
                 hashed_password=hash_password("pass1234"),
                 department=department,
                 role=role,
+                status=Status.approved,
             )
         )
         created += 1

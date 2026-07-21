@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import decode_access_token
-from app.models.user import Role, User
+from app.models.user import Role, Status, User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
@@ -32,7 +32,16 @@ def get_current_user(
     return user
 
 
-def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
+def get_approved_user(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.status != Status.approved:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="관리자 승인 대기 중입니다.",
+        )
+    return current_user
+
+
+def get_current_admin(current_user: User = Depends(get_approved_user)) -> User:
     if current_user.role != Role.admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

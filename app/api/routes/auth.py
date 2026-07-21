@@ -3,10 +3,31 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import create_access_token, verify_password
-from app.models.user import User
+from app.core.security import create_access_token, hash_password, verify_password
+from app.models.user import Status, User
+from app.schemas.user import UserCreate
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.post("/signup")
+def signup(body: UserCreate, db: Session = Depends(get_db)):
+    existing = db.query(User).filter(User.username == body.username).first()
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이미 사용 중인 아이디입니다.",
+        )
+    user = User(
+        username=body.username,
+        hashed_password=hash_password(body.password),
+        department=body.department,
+        role=body.role,
+        status=Status.pending,
+    )
+    db.add(user)
+    db.commit()
+    return {"username": user.username, "status": user.status.value}
 
 
 @router.post("/login")
