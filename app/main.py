@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes import auth, transcripts, users
 from app.core.config import settings
 
-app = FastAPI(title="회의록 AI")
+app = FastAPI(title="Noting")
 
 app.include_router(auth.router)
 app.include_router(users.router)

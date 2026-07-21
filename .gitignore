@@ -9,3 +9,6 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+# Docs (일일 보고서 등 로컬 문서)
+docs/
