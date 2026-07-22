@@ -7,6 +7,7 @@ from app.models.user import User
 from app.repositories import transcript as transcript_repo
 from app.schemas.transcript import TranscriptCreate
 from app.services.analyzer import analyze, summarize
+from app.services.embedding import embed
 from app.services.masking import mask_text
 from app.services.report import build_pdf_report, build_text_report
 from app.services.stt import transcribe
@@ -41,6 +42,7 @@ def list_transcripts(
             "id": t.id,
             "department": t.department.value,
             "masked_content": t.masked_content,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
         }
         for t in transcripts
     ]
@@ -81,10 +83,34 @@ def analyze_transcript(
     if transcript is None:
         raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
     result = analyze(transcript.masked_content)
+    embedding = embed(result["summary"]) if result["summary"] else None
+    transcript_repo.save_analysis(
+        db, transcript, result["summary"], result["tasks"], embedding
+    )
     return {
         "id": transcript.id,
         "summary": result["summary"],
         "tasks": result["tasks"],
+    }
+
+
+@router.get("/{transcript_id}/tasks")
+def get_transcript_tasks(
+    transcript_id: int,
+    current_user: User = Depends(get_approved_user),
+    db: Session = Depends(get_db),
+):
+    transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
+    if transcript is None:
+        raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
+    items = transcript_repo.get_action_items(db, current_user, transcript_id)
+    return {
+        "id": transcript.id,
+        "summary": transcript.summary,
+        "tasks": [
+            {"task": i.task, "assignee": i.assignee, "due": i.due, "request": i.request}
+            for i in items
+        ],
     }
 
 
@@ -158,4 +184,3 @@ def upload_and_transcribe(
         "department": transcript.department.value,
         "masked_content": transcript.masked_content,
     }
-

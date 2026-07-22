@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 
-from app.models.transcript import PiiEntry, Transcript
+from app.models.transcript import ActionItem, PiiEntry, Transcript
 from app.models.user import User
 
 
@@ -86,3 +86,41 @@ def update_transcript(
     db.commit()
     db.refresh(transcript)
     return transcript
+
+
+def save_analysis(
+    db: Session, transcript: Transcript, summary: str, tasks: list[dict], embedding
+):
+    transcript.summary = summary
+    if embedding is not None:
+        transcript.summary_embedding = embedding
+    db.query(ActionItem).filter(
+        ActionItem.transcript_id == transcript.id
+    ).delete()
+    for t in tasks:
+        db.add(
+            ActionItem(
+                transcript_id=transcript.id,
+                department=transcript.department,
+                task=t.get("task", "") or "",
+                assignee=t.get("assignee", "") or "",
+                due=t.get("due", "") or "",
+                request=t.get("request", "") or "",
+            )
+        )
+    db.commit()
+    db.refresh(transcript)
+    return transcript
+
+
+def get_action_items(
+    db: Session, current_user: User, transcript_id: int
+) -> list[ActionItem]:
+    return (
+        db.query(ActionItem)
+        .filter(
+            ActionItem.transcript_id == transcript_id,
+            ActionItem.department == current_user.department,
+        )
+        .all()
+    )

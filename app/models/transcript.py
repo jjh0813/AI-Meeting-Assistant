@@ -1,3 +1,4 @@
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, Text
 from sqlalchemy.sql import func
 
@@ -11,6 +12,8 @@ class Transcript(Base):
     id = Column(Integer, primary_key=True, index=True)
     department = Column(Enum(Department), nullable=False)
     masked_content = Column(Text, nullable=False)
+    summary = Column(Text, nullable=True)
+    summary_embedding = Column(Vector(768), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -22,4 +25,17 @@ class PiiEntry(Base):
     department = Column(Enum(Department), nullable=False)
     pii_type = Column(Text, nullable=False)
     original_value = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ActionItem(Base):
+    __tablename__ = "action_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    transcript_id = Column(Integer, ForeignKey("transcripts.id"), nullable=False)
+    department = Column(Enum(Department), nullable=False)
+    task = Column(Text, nullable=False, default="")
+    assignee = Column(Text, nullable=False, default="")
+    due = Column(Text, nullable=False, default="")
+    request = Column(Text, nullable=False, default="")
     created_at = Column(DateTime(timezone=True), server_default=func.now())

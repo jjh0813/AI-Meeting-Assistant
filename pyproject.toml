@@ -8,6 +8,7 @@ dependencies = [
     "fastapi[standard]>=0.139.0",
     "httpx>=0.28.1",
     "psycopg2-binary>=2.9.12",
+    "pgvector>=0.3.0",
     "pwdlib[argon2]>=0.3.0",
     "pydantic-settings>=2.14.2",
     "pyjwt>=2.13.0",

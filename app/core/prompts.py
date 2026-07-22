@@ -15,11 +15,11 @@ SUMMARY_PROMPT = """당신은 회의록을 정리하는 비서입니다.
 
 ANALYSIS_PROMPT = """다음 회의 내용을 분석해 JSON 형식으로만 답하세요.
 - summary: 핵심 내용을 3~5문장으로 요약
-- tasks: 처리할 일 목록. 각 항목은 task(할 일), assignee(담당자), due(기한)를 가집니다. 정보가 없으면 빈 문자열("")로 둡니다.
+- tasks: 처리할 일 목록. 각 항목은 task(할 일), assignee(담당자), due(기한), request(요청사항)를 가집니다. 정보가 없으면 빈 문자열("")로 둡니다.
 마스킹된 [이름], [전화번호]는 그대로 두고, 회의에 없는 내용은 만들지 마세요.
 
 출력 형식:
-{{"summary": "...", "tasks": [{{"task": "...", "assignee": "...", "due": "..."}}]}}
+{{"summary": "...", "tasks": [{{"task": "...", "assignee": "...", "due": "...", "request": "..."}}]}}
 
 회의 내용:
 {content}

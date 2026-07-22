@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     debug: bool = True
     database_url: str
     llm_model: str = "gemma4:e2b"
+    embed_model: str = "nomic-embed-text"
     ollama_base_url: str = "http://localhost:11434"
     secret_key: str
     access_token_expire_minutes: int = 60
