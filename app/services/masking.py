@@ -24,6 +24,8 @@ def _name_score(candidate: str, following: str) -> float:
         score += 0.4
     elif head.startswith(JOSA):
         score += 0.25
+    elif head[:1] in (",", "、", "·") or head.startswith("및"):
+        score += 0.2
     return score
 
 

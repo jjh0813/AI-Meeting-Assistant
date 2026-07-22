@@ -5,131 +5,336 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Noting</title>
 <style>
-  body { font-family: "Malgun Gothic", sans-serif; max-width: 780px; margin: 24px auto; padding: 0 16px; color: #222; }
-  h1 { color: #1a3b6e; }
-  h2 { color: #2e5c9e; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-top: 28px; }
-  input, textarea, button { font-size: 14px; }
-  input, textarea { width: 100%; padding: 8px; box-sizing: border-box; margin: 4px 0 10px; border: 1px solid #ccc; border-radius: 6px; }
-  textarea { height: 90px; }
-  button { background: #2e5c9e; color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; margin: 2px 4px 2px 0; }
-  button.sub { background: #6b7f9e; }
-  #login-box { max-width: 320px; }
-  .card { background: #f4f7fb; border: 1px solid #dbe3ef; border-radius: 8px; padding: 12px; margin: 10px 0; white-space: pre-wrap; }
+  * { box-sizing: border-box; }
+  body { font-family: "Malgun Gothic", sans-serif; max-width: 860px; margin: 0 auto; padding: 24px 16px 60px; color: #1f2937; background: #f8fafc; }
+  h1 { color: #1a3b6e; margin-bottom: 4px; }
+  .tagline { color: #64748b; margin-top: 0; font-size: 14px; }
+  h2 { color: #2e5c9e; font-size: 17px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; margin-top: 26px; }
+  input, textarea, select, button { font-size: 14px; font-family: inherit; }
+  input, textarea, select { width: 100%; padding: 9px; box-sizing: border-box; margin: 4px 0 12px; border: 1px solid #cbd5e1; border-radius: 8px; }
+  textarea { height: 90px; resize: vertical; }
+  button { background: #2e5c9e; color: #fff; border: none; padding: 9px 15px; border-radius: 8px; cursor: pointer; margin: 2px 6px 2px 0; }
+  button:hover { background: #24487c; }
+  button.sub { background: #64748b; padding: 6px 11px; font-size: 13px; }
+  button.danger { background: #b91c1c; }
+  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; margin: 10px 0; }
+  .muted { color: #64748b; font-size: 13px; }
   .hidden { display: none; }
-  .me { color: #555; font-size: 13px; }
-  .row { display: flex; gap: 8px; }
-  .row input { margin-bottom: 0; }
+  .userbar { display: flex; align-items: center; gap: 10px; background: #eef2f9; border-radius: 10px; padding: 10px 14px; }
+  .userbar .grow { flex: 1; }
+  .badge { display: inline-block; background: #dbeafe; color: #1e40af; border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+  .badge.wait { background: #fef3c7; color: #92400e; }
+  .badge.admin { background: #dcfce7; color: #166534; }
+  .result { white-space: pre-wrap; background: #f1f5f9; border-radius: 8px; padding: 12px; margin-top: 8px; font-size: 14px; }
+  .tlist .row { border-bottom: 1px solid #eef2f7; padding: 10px 0; }
+  .tlist .row:last-child { border-bottom: none; }
+  .tid { font-weight: 700; color: #1a3b6e; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+  th, td { border: 1px solid #e2e8f0; padding: 6px 8px; text-align: left; }
+  th { background: #f1f5f9; }
+  .err { color: #b91c1c; font-size: 13px; }
+  .tabs button { background: #e2e8f0; color: #334155; }
+  .tabs button.active { background: #2e5c9e; color: #fff; }
 </style>
 </head>
 <body>
 <h1>Noting</h1>
+<p class="tagline">회의 녹음 → 받아쓰기 → 개인정보 마스킹 → 요약·할일 → 보고서</p>
 
-<div id="login-box">
-  <h2>로그인</h2>
-  <input id="username" placeholder="아이디 (예: acc_user)" />
-  <input id="password" type="password" placeholder="비밀번호 (예: pass1234)" />
-  <button onclick="login()">로그인</button>
-  <div id="login-msg" class="me"></div>
+<!-- 로그인 / 회원가입 -->
+<div id="auth" class="card">
+  <div class="tabs">
+    <button id="tab-login" class="active" onclick="showTab('login')">로그인</button>
+    <button id="tab-signup" onclick="showTab('signup')">회원가입</button>
+  </div>
+
+  <div id="pane-login">
+    <input id="login-username" placeholder="아이디 (예: acc_user)" />
+    <input id="login-password" type="password" placeholder="비밀번호 (예: pass1234)" />
+    <button onclick="login()">로그인</button>
+    <div id="login-err" class="err"></div>
+  </div>
+
+  <div id="pane-signup" class="hidden">
+    <input id="su-username" placeholder="아이디" />
+    <input id="su-password" type="password" placeholder="비밀번호" />
+    <select id="su-department">
+      <option value="회계">회계</option>
+      <option value="경영">경영</option>
+      <option value="영업">영업</option>
+    </select>
+    <select id="su-role">
+      <option value="일반">일반</option>
+      <option value="관리자">관리자</option>
+    </select>
+    <button onclick="signup()">회원가입 신청</button>
+    <div id="su-msg" class="err"></div>
+    <p class="muted">가입 후 관리자 승인이 나야 기능을 사용할 수 있습니다.</p>
+  </div>
 </div>
 
+<!-- 로그인 후 -->
 <div id="app" class="hidden">
-  <div class="me" id="me"></div>
-
-  <h2>회의록 저장 (마스킹)</h2>
-  <textarea id="content" placeholder="회의 내용을 입력하세요. 예: 김철수 과장에게 010-1234-5678로 연락 바랍니다."></textarea>
-  <button onclick="createTranscript()">저장 &amp; 마스킹</button>
-  <div id="create-result" class="card hidden"></div>
-
-  <h2>작업 (현재 회의록 ID: <span id="current-id">-</span>)</h2>
-  <div class="row">
-    <input id="target-id" placeholder="회의록 ID" style="max-width:120px" />
-    <button class="sub" onclick="analyze()">분석(요약·할일)</button>
-    <button class="sub" onclick="viewPii()">원본 보기(관리자)</button>
-    <button class="sub" onclick="downloadPdf()">PDF 보고서</button>
-    <button class="sub" onclick="listTranscripts()">내 부서 목록</button>
+  <div class="userbar">
+    <div class="grow">
+      <b id="ub-name"></b>
+      <span id="ub-dept" class="badge"></span>
+      <span id="ub-role" class="badge"></span>
+      <span id="ub-status" class="badge"></span>
+    </div>
+    <button class="sub" onclick="logout()">로그아웃</button>
   </div>
-  <div id="result" class="card hidden"></div>
+
+  <!-- 승인 대기 -->
+  <div id="pending" class="card hidden">
+    <h2>승인 대기</h2>
+    <p>관리자의 승인을 기다리는 중입니다...</p>
+    <p class="muted">승인이 완료되면 회의록 기능을 사용할 수 있습니다.</p>
+  </div>
+
+  <!-- 승인된 사용자 기능 -->
+  <div id="features" class="hidden">
+    <h2>새 회의록</h2>
+    <div class="card">
+      <textarea id="new-content" placeholder="회의 내용을 붙여넣기 (텍스트)"></textarea>
+      <button onclick="saveText()">텍스트 저장 &amp; 마스킹</button>
+      <hr style="border:none;border-top:1px solid #eef2f7;margin:14px 0;">
+      <label class="muted">또는 녹음 파일 업로드 (STT)</label>
+      <input id="audio-file" type="file" accept="audio/*" />
+      <button onclick="uploadAudio()">녹음 업로드 &amp; 변환</button>
+      <div id="new-msg" class="err"></div>
+    </div>
+
+    <h2>내 부서 회의록</h2>
+    <button class="sub" onclick="listTranscripts()">목록 새로고침</button>
+    <div id="tlist" class="card tlist"><span class="muted">목록 새로고침을 눌러 불러오세요.</span></div>
+
+    <div id="result-box" class="card hidden">
+      <h2 style="margin-top:0;">결과 (회의록 #<span id="result-id"></span>)</h2>
+      <div id="result"></div>
+    </div>
+
+    <!-- 관리자: 승인 요청 -->
+    <div id="admin-box" class="hidden">
+      <h2>가입 승인 요청 (관리자)</h2>
+      <button class="sub" onclick="loadPending()">요청 새로고침</button>
+      <div id="pending-list" class="card"><span class="muted">요청 새로고침을 눌러 불러오세요.</span></div>
+    </div>
+  </div>
 </div>
 
 <script>
 let token = null;
+let me = null;
 
-function authHeaders(extra) {
-  return Object.assign({ "Authorization": "Bearer " + token }, extra || {});
+function showTab(t) {
+  document.getElementById("pane-login").classList.toggle("hidden", t !== "login");
+  document.getElementById("pane-signup").classList.toggle("hidden", t !== "signup");
+  document.getElementById("tab-login").classList.toggle("active", t === "login");
+  document.getElementById("tab-signup").classList.toggle("active", t === "signup");
+}
+
+async function api(path, options = {}) {
+  const headers = options.headers || {};
+  if (token) headers["Authorization"] = "Bearer " + token;
+  const res = await fetch(path, { ...options, headers });
+  if (!res.ok) {
+    let detail = res.status;
+    try { detail = (await res.json()).detail || detail; } catch (e) {}
+    throw new Error(detail);
+  }
+  return res;
 }
 
 async function login() {
-  const username = document.getElementById("username").value;
-  const password = document.getElementById("password").value;
-  const res = await fetch("/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ username, password }),
-  });
-  if (!res.ok) {
-    document.getElementById("login-msg").textContent = "로그인 실패 (아이디/비밀번호 확인)";
-    return;
-  }
-  const data = await res.json();
-  token = data.access_token;
-  const me = await (await fetch("/me", { headers: authHeaders() })).json();
-  document.getElementById("me").textContent =
-    `로그인: ${me.username} (부서: ${me.department}, 역할: ${me.role})`;
-  document.getElementById("login-box").classList.add("hidden");
+  const errEl = document.getElementById("login-err");
+  errEl.textContent = "";
+  const body = new URLSearchParams();
+  body.append("username", document.getElementById("login-username").value);
+  body.append("password", document.getElementById("login-password").value);
+  try {
+    const res = await fetch("/auth/login", { method: "POST", body });
+    if (!res.ok) throw new Error("아이디 또는 비밀번호가 올바르지 않습니다.");
+    token = (await res.json()).access_token;
+    await loadMe();
+  } catch (e) { errEl.textContent = e.message; }
+}
+
+async function signup() {
+  const msg = document.getElementById("su-msg");
+  msg.textContent = "";
+  const payload = {
+    username: document.getElementById("su-username").value,
+    password: document.getElementById("su-password").value,
+    department: document.getElementById("su-department").value,
+    role: document.getElementById("su-role").value,
+  };
+  try {
+    await api("/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    msg.style.color = "#166534";
+    msg.textContent = "가입 완료! 관리자 승인 후 로그인해 이용하세요.";
+  } catch (e) { msg.style.color = "#b91c1c"; msg.textContent = e.message; }
+}
+
+async function loadMe() {
+  me = await (await api("/me")).json();
+  document.getElementById("auth").classList.add("hidden");
   document.getElementById("app").classList.remove("hidden");
+  document.getElementById("ub-name").textContent = me.username;
+  document.getElementById("ub-dept").textContent = me.department;
+  document.getElementById("ub-role").textContent = me.role;
+  const st = document.getElementById("ub-status");
+  st.textContent = me.status;
+  st.className = "badge" + (me.status === "승인" ? "" : " wait");
+  document.getElementById("ub-role").className = "badge" + (me.role === "관리자" ? " admin" : "");
+
+  const approved = me.status === "승인";
+  document.getElementById("pending").classList.toggle("hidden", approved);
+  document.getElementById("features").classList.toggle("hidden", !approved);
+  document.getElementById("admin-box").classList.toggle("hidden", !(approved && me.role === "관리자"));
 }
 
-function showResult(obj) {
-  const el = document.getElementById("result");
-  el.classList.remove("hidden");
-  el.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+function logout() {
+  token = null; me = null;
+  document.getElementById("app").classList.add("hidden");
+  document.getElementById("auth").classList.remove("hidden");
 }
 
-async function createTranscript() {
-  const content = document.getElementById("content").value;
-  const res = await fetch("/transcripts", {
-    method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ content }),
-  });
-  const data = await res.json();
-  const box = document.getElementById("create-result");
-  box.classList.remove("hidden");
-  box.textContent = `저장됨 (ID: ${data.id})\n마스킹 결과: ${data.masked_content}`;
-  document.getElementById("current-id").textContent = data.id;
-  document.getElementById("target-id").value = data.id;
+async function saveText() {
+  const msg = document.getElementById("new-msg");
+  msg.textContent = "";
+  const content = document.getElementById("new-content").value.trim();
+  if (!content) { msg.textContent = "내용을 입력하세요."; return; }
+  try {
+    const data = await (await api("/transcripts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    })).json();
+    document.getElementById("new-content").value = "";
+    showResult(data.id, "저장 완료 (마스킹된 본문):\n\n" + data.masked_content);
+    listTranscripts();
+  } catch (e) { msg.textContent = e.message; }
 }
 
-function targetId() {
-  return document.getElementById("target-id").value;
-}
-
-async function analyze() {
-  const res = await fetch(`/transcripts/${targetId()}/analysis`, { headers: authHeaders() });
-  showResult(await res.json());
-}
-
-async function viewPii() {
-  const res = await fetch(`/transcripts/${targetId()}/pii`, { headers: authHeaders() });
-  if (res.status === 403) { showResult("접근 거부: 개인정보 원본은 관리자만 볼 수 있습니다."); return; }
-  showResult(await res.json());
+async function uploadAudio() {
+  const msg = document.getElementById("new-msg");
+  msg.textContent = "";
+  const f = document.getElementById("audio-file").files[0];
+  if (!f) { msg.textContent = "파일을 선택하세요."; return; }
+  msg.style.color = "#64748b";
+  msg.textContent = "변환 중... (STT는 시간이 걸릴 수 있습니다)";
+  const fd = new FormData();
+  fd.append("file", f);
+  try {
+    const data = await (await api("/transcripts/upload", { method: "POST", body: fd })).json();
+    msg.textContent = "";
+    showResult(data.id, "STT 변환 & 마스킹 완료:\n\n" + data.masked_content);
+    listTranscripts();
+  } catch (e) { msg.style.color = "#b91c1c"; msg.textContent = e.message; }
 }
 
 async function listTranscripts() {
-  const res = await fetch("/transcripts", { headers: authHeaders() });
-  showResult(await res.json());
+  const box = document.getElementById("tlist");
+  try {
+    const items = await (await api("/transcripts")).json();
+    if (!items.length) { box.innerHTML = '<span class="muted">저장된 회의록이 없습니다.</span>'; return; }
+    box.innerHTML = "";
+    items.forEach((t) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      const snippet = t.masked_content.length > 80 ? t.masked_content.slice(0, 80) + "…" : t.masked_content;
+      let btns = `<button class="sub" onclick="summarize(${t.id})">요약</button>`
+        + `<button class="sub" onclick="analyze(${t.id})">분석(할일)</button>`
+        + `<button class="sub" onclick="downloadPdf(${t.id})">PDF 보고서</button>`;
+      if (me.role === "관리자") btns += `<button class="sub" onclick="viewPii(${t.id})">원본 보기</button>`;
+      row.innerHTML = `<div><span class="tid">#${t.id}</span> <span class="muted">${snippet}</span></div><div style="margin-top:6px;">${btns}</div>`;
+      box.appendChild(row);
+    });
+  } catch (e) { box.innerHTML = `<span class="err">${e.message}</span>`; }
 }
 
-async function downloadPdf() {
-  const id = targetId();
-  const res = await fetch(`/transcripts/${id}/report.pdf`, { headers: authHeaders() });
-  if (!res.ok) { showResult("보고서 생성 실패"); return; }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = `report_${id}.pdf`; a.click();
-  URL.revokeObjectURL(url);
-  showResult(`PDF 다운로드 시작: report_${id}.pdf`);
+function showResult(id, html) {
+  document.getElementById("result-box").classList.remove("hidden");
+  document.getElementById("result-id").textContent = id;
+  document.getElementById("result").innerHTML = '<div class="result">' + html + "</div>";
+}
+
+async function summarize(id) {
+  showResult(id, "요약 생성 중...");
+  try {
+    const data = await (await api(`/transcripts/${id}/summary`)).json();
+    showResult(id, data.summary || "(요약 없음)");
+  } catch (e) { showResult(id, "오류: " + e.message); }
+}
+
+async function analyze(id) {
+  showResult(id, "분석 중...");
+  try {
+    const data = await (await api(`/transcripts/${id}/analysis`)).json();
+    let html = (data.summary || "(요약 없음)") + "\n";
+    let rows = (data.tasks || []).map((t) =>
+      `<tr><td>${t.task || "-"}</td><td>${t.assignee || "-"}</td><td>${t.due || "-"}</td></tr>`
+    ).join("");
+    if (!rows) rows = '<tr><td colspan="3">추출된 할 일 없음</td></tr>';
+    const table = `<table><tr><th>할 일</th><th>담당자</th><th>기한</th></tr>${rows}</table>`;
+    document.getElementById("result-box").classList.remove("hidden");
+    document.getElementById("result-id").textContent = id;
+    document.getElementById("result").innerHTML = '<div class="result">' + html + "</div>" + table;
+  } catch (e) { showResult(id, "오류: " + e.message); }
+}
+
+async function viewPii(id) {
+  showResult(id, "원본 불러오는 중...");
+  try {
+    const items = await (await api(`/transcripts/${id}/pii`)).json();
+    if (!items.length) { showResult(id, "저장된 개인정보 원본이 없습니다."); return; }
+    const rows = items.map((p) => `<tr><td>${p.pii_type}</td><td>${p.original_value}</td></tr>`).join("");
+    document.getElementById("result-box").classList.remove("hidden");
+    document.getElementById("result-id").textContent = id;
+    document.getElementById("result").innerHTML = `<table><tr><th>종류</th><th>원본 값</th></tr>${rows}</table>`;
+  } catch (e) { showResult(id, "오류: " + e.message); }
+}
+
+async function downloadPdf(id) {
+  try {
+    const res = await api(`/transcripts/${id}/report.pdf`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `report_${id}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) { showResult(id, "오류: " + e.message); }
+}
+
+async function loadPending() {
+  const box = document.getElementById("pending-list");
+  try {
+    const items = await (await api("/users/pending")).json();
+    if (!items.length) { box.innerHTML = '<span class="muted">대기 중인 가입 요청이 없습니다.</span>'; return; }
+    box.innerHTML = "";
+    items.forEach((u) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML = `<span class="tid">${u.username}</span> `
+        + `<span class="badge">${u.department}</span> <span class="badge">${u.role}</span> `
+        + `<button class="sub" onclick="decide(${u.id}, 'approve')">승인</button>`
+        + `<button class="sub danger" onclick="decide(${u.id}, 'reject')">거절</button>`;
+      box.appendChild(row);
+    });
+  } catch (e) { box.innerHTML = `<span class="err">${e.message}</span>`; }
+}
+
+async function decide(userId, action) {
+  try {
+    await api(`/users/${userId}/${action}`, { method: "POST" });
+    loadPending();
+  } catch (e) { alert(e.message); }
 }
 </script>
 </body>
