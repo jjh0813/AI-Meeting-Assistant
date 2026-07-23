@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import auth, transcripts, users
@@ -18,7 +19,7 @@ app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
 
 @app.get("/")
 def root():
-    return {"message": "회의록 AI 서버가 실행 중입니다."}
+    return RedirectResponse(url="/ui/", status_code=302)
 
 
 @app.get("/health")
