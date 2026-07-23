@@ -11,16 +11,66 @@ from app.schemas.transcript import (
     TranscriptSearchRequest,
 )
 from app.services.analyzer import analyze, summarize
+from app.services.chunking import split_text
 from app.services.embedding import embed
 from app.services.masking import mask_text
 from app.services.qa import answer_from_meetings
+from app.services.question_guard import guard_meeting_question
 from app.services.report import build_pdf_report, build_text_report
 from app.services.stt import transcribe
 
 router = APIRouter(prefix="/transcripts", tags=["transcripts"])
 
-MIN_RAG_SIMILARITY = 0.55
+MIN_RAG_SIMILARITY = 0.60
 MEETING_ONLY_MESSAGE = "Noting은 내 부서 회의록과 업무 관련 질문만 답할 수 있습니다."
+
+
+def find_rag_sources(
+    db: Session, current_user: User, query_embedding: list[float], limit: int
+) -> list[dict]:
+    chunk_matches = transcript_repo.search_similar_chunks(
+        db, current_user, query_embedding, limit
+    )
+    chunk_sources = [
+        {
+            "id": transcript.id,
+            "chunk_id": chunk.id,
+            "chunk_index": chunk.chunk_index,
+            "content": chunk.content,
+            "summary": transcript.summary,
+            "source_type": "chunk",
+            "similarity": round(1 - float(distance), 4),
+            "created_at": transcript.created_at.isoformat()
+            if transcript.created_at
+            else None,
+        }
+        for chunk, transcript, distance in chunk_matches
+    ]
+    summary_matches = transcript_repo.search_similar_summaries(
+        db, current_user, query_embedding, limit
+    )
+    chunk_transcript_ids = {source["id"] for source in chunk_sources}
+    summary_sources = [
+        {
+            "id": transcript.id,
+            "chunk_id": None,
+            "chunk_index": None,
+            "content": transcript.summary,
+            "summary": transcript.summary,
+            "source_type": "summary",
+            "similarity": round(1 - float(distance), 4),
+            "created_at": transcript.created_at.isoformat()
+            if transcript.created_at
+            else None,
+        }
+        for transcript, distance in summary_matches
+        if transcript.id not in chunk_transcript_ids
+    ]
+    return sorted(
+        chunk_sources + summary_sources,
+        key=lambda source: source["similarity"],
+        reverse=True,
+    )[:limit]
 
 
 @router.post("")
@@ -73,23 +123,10 @@ def search_transcripts(
             detail="검색용 임베딩을 생성하지 못했습니다. Ollama 임베딩 모델 상태를 확인해 주세요.",
         )
 
-    matches = transcript_repo.search_similar_summaries(
-        db, current_user, query_embedding, body.limit
-    )
+    results = find_rag_sources(db, current_user, query_embedding, body.limit)
     return {
         "query": query,
-        "results": [
-            {
-                "id": transcript.id,
-                "summary": transcript.summary,
-                "masked_content": transcript.masked_content,
-                "similarity": round(1 - float(distance), 4),
-                "created_at": transcript.created_at.isoformat()
-                if transcript.created_at
-                else None,
-            }
-            for transcript, distance in matches
-        ],
+        "results": results,
     }
 
 
@@ -103,6 +140,17 @@ def ask_about_meetings(
     if not question:
         raise HTTPException(status_code=422, detail="질문을 입력해 주세요.")
 
+    guard_result = guard_meeting_question(question)
+    if guard_result is not None:
+        message, reason = guard_result
+        return {
+            "answer": message,
+            "sources": [],
+            "grounded": False,
+            "blocked": True,
+            "blocked_reason": reason,
+        }
+
     query_embedding = embed(question)
     if query_embedding is None:
         raise HTTPException(
@@ -110,32 +158,26 @@ def ask_about_meetings(
             detail="검색용 임베딩을 생성하지 못했습니다. Ollama 임베딩 모델 상태를 확인해 주세요.",
         )
 
-    matches = transcript_repo.search_similar_summaries(
-        db, current_user, query_embedding, limit=3
-    )
     sources = [
-        {
-            "id": transcript.id,
-            "summary": transcript.summary,
-            "similarity": round(1 - float(distance), 4),
-            "created_at": transcript.created_at.isoformat()
-            if transcript.created_at
-            else None,
-        }
-        for transcript, distance in matches
-        if 1 - float(distance) >= MIN_RAG_SIMILARITY
+        source
+        for source in find_rag_sources(db, current_user, query_embedding, limit=3)
+        if source["similarity"] >= MIN_RAG_SIMILARITY
     ]
     if not sources:
         return {
             "answer": MEETING_ONLY_MESSAGE,
             "sources": [],
             "grounded": False,
+            "blocked": True,
+            "blocked_reason": "low_similarity",
         }
 
     return {
         "answer": answer_from_meetings(question, sources),
         "sources": sources,
         "grounded": True,
+        "blocked": False,
+        "blocked_reason": None,
     }
 
 
@@ -175,13 +217,30 @@ def analyze_transcript(
         raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
     result = analyze(transcript.masked_content)
     embedding = embed(result["summary"]) if result["summary"] else None
+    indexed_chunks = []
+    for chunk_index, content in enumerate(split_text(transcript.masked_content)):
+        chunk_embedding = embed(content)
+        if chunk_embedding is not None:
+            indexed_chunks.append(
+                {
+                    "chunk_index": chunk_index,
+                    "content": content,
+                    "embedding": chunk_embedding,
+                }
+            )
     transcript_repo.save_analysis(
-        db, transcript, result["summary"], result["tasks"], embedding
+        db,
+        transcript,
+        result["summary"],
+        result["tasks"],
+        embedding,
+        indexed_chunks,
     )
     return {
         "id": transcript.id,
         "summary": result["summary"],
         "tasks": result["tasks"],
+        "indexed_chunks": len(indexed_chunks),
     }
 
 

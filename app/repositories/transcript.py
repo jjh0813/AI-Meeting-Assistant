@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 
-from app.models.transcript import ActionItem, PiiEntry, Transcript
+from app.models.transcript import ActionItem, PiiEntry, Transcript, TranscriptChunk
 from app.models.user import User
 
 
@@ -88,17 +88,25 @@ def update_transcript(
             )
         )
     db.query(ActionItem).filter(ActionItem.transcript_id == transcript_id).delete()
+    db.query(TranscriptChunk).filter(
+        TranscriptChunk.transcript_id == transcript_id,
+        TranscriptChunk.department == current_user.department,
+    ).delete()
     db.commit()
     db.refresh(transcript)
     return transcript
 
 
 def save_analysis(
-    db: Session, transcript: Transcript, summary: str, tasks: list[dict], embedding
+    db: Session,
+    transcript: Transcript,
+    summary: str,
+    tasks: list[dict],
+    embedding,
+    chunks: list[dict],
 ):
     transcript.summary = summary
-    if embedding is not None:
-        transcript.summary_embedding = embedding
+    transcript.summary_embedding = embedding
     db.query(ActionItem).filter(
         ActionItem.transcript_id == transcript.id
     ).delete()
@@ -111,6 +119,19 @@ def save_analysis(
                 assignee=t.get("assignee", "") or "",
                 due=t.get("due", "") or "",
                 request=t.get("request", "") or "",
+            )
+        )
+    db.query(TranscriptChunk).filter(
+        TranscriptChunk.transcript_id == transcript.id
+    ).delete()
+    for chunk in chunks:
+        db.add(
+            TranscriptChunk(
+                transcript_id=transcript.id,
+                department=transcript.department,
+                chunk_index=chunk["chunk_index"],
+                content=chunk["content"],
+                embedding=chunk["embedding"],
             )
         )
     db.commit()
@@ -144,6 +165,27 @@ def search_similar_summaries(
             Transcript.department == current_user.department,
             Transcript.summary.is_not(None),
             Transcript.summary_embedding.is_not(None),
+        )
+        .order_by(distance)
+        .limit(limit)
+        .all()
+    )
+
+
+def search_similar_chunks(
+    db: Session, current_user: User, query_embedding: list[float], limit: int
+):
+    """Return the closest masked meeting chunks within the user's department."""
+    distance = TranscriptChunk.embedding.cosine_distance(query_embedding).label(
+        "distance"
+    )
+    return (
+        db.query(TranscriptChunk, Transcript, distance)
+        .join(Transcript, Transcript.id == TranscriptChunk.transcript_id)
+        .filter(
+            TranscriptChunk.department == current_user.department,
+            Transcript.department == current_user.department,
+            TranscriptChunk.embedding.is_not(None),
         )
         .order_by(distance)
         .limit(limit)

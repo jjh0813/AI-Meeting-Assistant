@@ -39,3 +39,17 @@ class ActionItem(Base):
     due = Column(Text, nullable=False, default="")
     request = Column(Text, nullable=False, default="")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class TranscriptChunk(Base):
+    __tablename__ = "transcript_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    transcript_id = Column(
+        Integer, ForeignKey("transcripts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    department = Column(Enum(Department), nullable=False, index=True)
+    chunk_index = Column(Integer, nullable=False)
+    content = Column(Text, nullable=False)
+    embedding = Column(Vector(768), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

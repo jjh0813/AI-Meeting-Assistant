@@ -377,7 +377,7 @@
     const button = $("qa-submit"); const box = $("qa-result"); button.disabled = true; button.textContent = "검색 중..."; box.classList.remove("hidden"); box.innerHTML = '<div class="qa-answer muted">관련 회의록을 찾고 있습니다.</div>';
     try {
       const data = await (await api("/transcripts/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question }) })).json();
-      const sources = (data.sources || []).map(source => `<button type="button" class="qa-source" onclick="openTranscript(${source.id})">회의록 #${source.id} · 유사도 ${source.similarity} · ${escapeHtml(source.summary || "요약 없음")}</button>`).join("");
+      const sources = (data.sources || []).map(source => `<button type="button" class="qa-source" onclick="openTranscript(${source.id})">회의록 #${source.id}${source.chunk_index === null || source.chunk_index === undefined ? "" : ` · 본문 조각 ${source.chunk_index + 1}`} · 유사도 ${source.similarity} · ${escapeHtml(source.content || source.summary || "근거 없음")}</button>`).join("");
       box.innerHTML = `<div class="qa-answer">${escapeHtml(data.answer)}</div>${sources ? `<div class="qa-sources"><b class="small">답변 근거</b>${sources}</div>` : ""}`;
     } catch (error) { box.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`; }
     finally { button.disabled = false; button.textContent = "질문하기"; }
