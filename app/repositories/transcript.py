@@ -124,3 +124,23 @@ def get_action_items(
         )
         .all()
     )
+
+
+def search_similar_summaries(
+    db: Session, current_user: User, query_embedding: list[float], limit: int
+):
+    """Return the closest analyzed meeting summaries within the user's department."""
+    distance = Transcript.summary_embedding.cosine_distance(query_embedding).label(
+        "distance"
+    )
+    return (
+        db.query(Transcript, distance)
+        .filter(
+            Transcript.department == current_user.department,
+            Transcript.summary.is_not(None),
+            Transcript.summary_embedding.is_not(None),
+        )
+        .order_by(distance)
+        .limit(limit)
+        .all()
+    )

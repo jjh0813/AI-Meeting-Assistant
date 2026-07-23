@@ -5,7 +5,7 @@ from app.api.deps import get_approved_user, get_current_admin
 from app.core.database import get_db
 from app.models.user import User
 from app.repositories import transcript as transcript_repo
-from app.schemas.transcript import TranscriptCreate
+from app.schemas.transcript import TranscriptCreate, TranscriptSearchRequest
 from app.services.analyzer import analyze, summarize
 from app.services.embedding import embed
 from app.services.masking import mask_text
@@ -46,6 +46,43 @@ def list_transcripts(
         }
         for t in transcripts
     ]
+
+
+@router.post("/search")
+def search_transcripts(
+    body: TranscriptSearchRequest,
+    current_user: User = Depends(get_approved_user),
+    db: Session = Depends(get_db),
+):
+    query = body.query.strip()
+    if not query:
+        raise HTTPException(status_code=422, detail="검색어를 입력해 주세요.")
+
+    query_embedding = embed(query)
+    if query_embedding is None:
+        raise HTTPException(
+            status_code=503,
+            detail="검색용 임베딩을 생성하지 못했습니다. Ollama 임베딩 모델 상태를 확인해 주세요.",
+        )
+
+    matches = transcript_repo.search_similar_summaries(
+        db, current_user, query_embedding, body.limit
+    )
+    return {
+        "query": query,
+        "results": [
+            {
+                "id": transcript.id,
+                "summary": transcript.summary,
+                "masked_content": transcript.masked_content,
+                "similarity": round(1 - float(distance), 4),
+                "created_at": transcript.created_at.isoformat()
+                if transcript.created_at
+                else None,
+            }
+            for transcript, distance in matches
+        ],
+    }
 
 
 @router.get("/{transcript_id}/pii")
