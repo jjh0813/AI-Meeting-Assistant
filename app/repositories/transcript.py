@@ -1,6 +1,12 @@
 from sqlalchemy.orm import Session
 
-from app.models.transcript import ActionItem, PiiEntry, Transcript, TranscriptChunk
+from app.models.transcript import (
+    ActionItem,
+    ActionItemStatus,
+    PiiEntry,
+    Transcript,
+    TranscriptChunk,
+)
 from app.models.user import User
 
 
@@ -107,6 +113,12 @@ def save_analysis(
 ):
     transcript.summary = summary
     transcript.summary_embedding = embedding
+    existing_statuses = {
+        (item.task.strip(), item.assignee.strip()): item.status
+        for item in db.query(ActionItem)
+        .filter(ActionItem.transcript_id == transcript.id)
+        .all()
+    }
     db.query(ActionItem).filter(
         ActionItem.transcript_id == transcript.id
     ).delete()
@@ -119,6 +131,14 @@ def save_analysis(
                 assignee=t.get("assignee", "") or "",
                 due=t.get("due", "") or "",
                 request=t.get("request", "") or "",
+                status=existing_statuses.get(
+                    (
+                        (t.get("task", "") or "").strip(),
+                        (t.get("assignee", "") or "").strip(),
+                    ),
+                    ActionItemStatus.pending,
+                ),
+                task_embedding=t.get("task_embedding"),
             )
         )
     db.query(TranscriptChunk).filter(
@@ -148,6 +168,58 @@ def get_action_items(
             ActionItem.transcript_id == transcript_id,
             ActionItem.department == current_user.department,
         )
+        .all()
+    )
+
+
+def get_action_item(
+    db: Session,
+    current_user: User,
+    transcript_id: int,
+    action_item_id: int,
+):
+    return (
+        db.query(ActionItem)
+        .filter(
+            ActionItem.id == action_item_id,
+            ActionItem.transcript_id == transcript_id,
+            ActionItem.department == current_user.department,
+        )
+        .first()
+    )
+
+
+def update_action_item_status(
+    db: Session,
+    action_item: ActionItem,
+    status: ActionItemStatus,
+) -> ActionItem:
+    action_item.status = status
+    db.commit()
+    db.refresh(action_item)
+    return action_item
+
+
+def search_similar_action_items(
+    db: Session,
+    current_user: User,
+    task_embedding: list[float],
+    exclude_transcript_id: int,
+    limit: int = 3,
+):
+    distance = ActionItem.task_embedding.cosine_distance(task_embedding).label(
+        "distance"
+    )
+    return (
+        db.query(ActionItem, distance)
+        .filter(
+            ActionItem.department == current_user.department,
+            ActionItem.transcript_id != exclude_transcript_id,
+            ActionItem.status != ActionItemStatus.completed,
+            ActionItem.task_embedding.is_not(None),
+        )
+        .order_by(distance)
+        .limit(limit)
         .all()
     )
 

@@ -1,9 +1,17 @@
+import enum
+
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, Text
 from sqlalchemy.sql import func
 
 from app.core.database import Base
 from app.models.user import Department
+
+
+class ActionItemStatus(str, enum.Enum):
+    pending = "대기"
+    in_progress = "진행중"
+    completed = "완료"
 
 
 class Transcript(Base):
@@ -38,6 +46,10 @@ class ActionItem(Base):
     assignee = Column(Text, nullable=False, default="")
     due = Column(Text, nullable=False, default="")
     request = Column(Text, nullable=False, default="")
+    status = Column(
+        Enum(ActionItemStatus), nullable=False, default=ActionItemStatus.pending
+    )
+    task_embedding = Column(Vector(768), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

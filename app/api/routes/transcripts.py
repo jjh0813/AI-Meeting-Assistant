@@ -3,9 +3,11 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_approved_user, get_current_admin
 from app.core.database import get_db
+from app.models.transcript import ActionItemStatus
 from app.models.user import User
 from app.repositories import transcript as transcript_repo
 from app.schemas.transcript import (
+    ActionItemStatusUpdate,
     TranscriptCreate,
     TranscriptQuestionRequest,
     TranscriptSearchRequest,
@@ -22,6 +24,7 @@ from app.services.stt import transcribe
 router = APIRouter(prefix="/transcripts", tags=["transcripts"])
 
 MIN_RAG_SIMILARITY = 0.60
+MIN_TASK_DUPLICATE_SIMILARITY = 0.75
 MEETING_ONLY_MESSAGE = "Noting은 내 부서 회의록과 업무 관련 질문만 답할 수 있습니다."
 
 
@@ -228,11 +231,29 @@ def analyze_transcript(
                     "embedding": chunk_embedding,
                 }
             )
+    indexed_tasks = []
+    for task in result["tasks"]:
+        task_text = " ".join(
+            value
+            for value in (
+                task.get("task", ""),
+                task.get("request", ""),
+                task.get("assignee", ""),
+                task.get("due", ""),
+            )
+            if value
+        )
+        indexed_tasks.append(
+            {
+                **task,
+                "task_embedding": embed(task_text) if task_text else None,
+            }
+        )
     transcript_repo.save_analysis(
         db,
         transcript,
         result["summary"],
-        result["tasks"],
+        indexed_tasks,
         embedding,
         indexed_chunks,
     )
@@ -241,6 +262,9 @@ def analyze_transcript(
         "summary": result["summary"],
         "tasks": result["tasks"],
         "indexed_chunks": len(indexed_chunks),
+        "indexed_tasks": sum(
+            1 for task in indexed_tasks if task["task_embedding"] is not None
+        ),
     }
 
 
@@ -258,9 +282,98 @@ def get_transcript_tasks(
         "id": transcript.id,
         "summary": transcript.summary,
         "tasks": [
-            {"task": i.task, "assignee": i.assignee, "due": i.due, "request": i.request}
+            {
+                "id": i.id,
+                "task": i.task,
+                "assignee": i.assignee,
+                "due": i.due,
+                "request": i.request,
+                "status": i.status.value,
+            }
             for i in items
         ],
+    }
+
+
+@router.patch("/{transcript_id}/tasks/{task_id}")
+def update_task_status(
+    transcript_id: int,
+    task_id: int,
+    body: ActionItemStatusUpdate,
+    current_user: User = Depends(get_approved_user),
+    db: Session = Depends(get_db),
+):
+    action_item = transcript_repo.get_action_item(
+        db, current_user, transcript_id, task_id
+    )
+    if action_item is None:
+        raise HTTPException(status_code=404, detail="업무를 찾을 수 없습니다.")
+    updated = transcript_repo.update_action_item_status(
+        db, action_item, ActionItemStatus(body.status)
+    )
+    return {
+        "id": updated.id,
+        "transcript_id": updated.transcript_id,
+        "status": updated.status.value,
+    }
+
+
+@router.get("/{transcript_id}/task-duplicates")
+def find_task_duplicates(
+    transcript_id: int,
+    current_user: User = Depends(get_approved_user),
+    db: Session = Depends(get_db),
+):
+    transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
+    if transcript is None:
+        raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
+
+    items = transcript_repo.get_action_items(db, current_user, transcript_id)
+    results = []
+    for item in items:
+        if (
+            item.status == ActionItemStatus.completed
+            or item.task_embedding is None
+        ):
+            continue
+        matches = transcript_repo.search_similar_action_items(
+            db,
+            current_user,
+            item.task_embedding,
+            exclude_transcript_id=transcript_id,
+        )
+        duplicates = [
+            {
+                "id": candidate.id,
+                "transcript_id": candidate.transcript_id,
+                "task": candidate.task,
+                "assignee": candidate.assignee,
+                "due": candidate.due,
+                "request": candidate.request,
+                "status": candidate.status.value,
+                "similarity": round(1 - float(distance), 4),
+            }
+            for candidate, distance in matches
+            if 1 - float(distance) >= MIN_TASK_DUPLICATE_SIMILARITY
+        ]
+        if duplicates:
+            results.append(
+                {
+                    "task": {
+                        "id": item.id,
+                        "task": item.task,
+                        "assignee": item.assignee,
+                        "due": item.due,
+                        "request": item.request,
+                        "status": item.status.value,
+                    },
+                    "duplicate_candidates": duplicates,
+                }
+            )
+    return {
+        "transcript_id": transcript_id,
+        "duplicate_groups": results,
+        "threshold": MIN_TASK_DUPLICATE_SIMILARITY,
     }
 
 
