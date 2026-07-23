@@ -20,6 +20,8 @@ class MainRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("아이디를 입력하세요", response.text)
+        self.assertIn('sessionStorage.getItem("noting_token")', response.text)
+        self.assertIn("HTTPS", response.text)
 
 
 if __name__ == "__main__":

@@ -251,7 +251,7 @@
   </main>
 
 <script>
-  let token = null;
+  let token = sessionStorage.getItem("noting_token");
   let me = null;
   let transcripts = [];
   let dashboardTasks = [];
@@ -277,7 +277,7 @@
   async function login() {
     setMessage("login-message", "");
     const body = new URLSearchParams({ username: $("login-username").value, password: $("login-password").value });
-    try { const response = await fetch("/auth/login", { method: "POST", body }); if (!response.ok) throw new Error("아이디 또는 비밀번호를 확인해 주세요."); token = (await response.json()).access_token; await loadMe(); } catch (error) { setMessage("login-message", error.message); }
+    try { const response = await fetch("/auth/login", { method: "POST", body }); if (!response.ok) throw new Error("아이디 또는 비밀번호를 확인해 주세요."); token = (await response.json()).access_token; sessionStorage.setItem("noting_token", token); await loadMe(); } catch (error) { setMessage("login-message", error.message); }
   }
 
   async function signup() {
@@ -296,7 +296,7 @@
     if (approved) await refreshDashboard();
   }
 
-  function logout() { token = null; me = null; transcripts = []; dashboardTasks = []; hideResult(); $("app-view").classList.add("hidden"); $("auth-view").classList.remove("hidden"); }
+  function logout() { sessionStorage.removeItem("noting_token"); token = null; me = null; transcripts = []; dashboardTasks = []; hideResult(); $("app-view").classList.add("hidden"); $("auth-view").classList.remove("hidden"); }
 
   async function refreshDashboard() {
     try {
@@ -358,6 +358,11 @@
 
   async function toggleRecording() { if (recorder.stream) await stopRecording(); else await startRecording(); }
   async function startRecording() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setComposerMode("audio");
+      setMessage("new-message", "브라우저 보안 정책상 IP 주소의 HTTP 접속에서는 마이크 녹음을 사용할 수 없습니다. HTTPS로 접속하거나 음성 파일 업로드를 이용해 주세요.");
+      return;
+    }
     try {
       recorder.stream = await navigator.mediaDevices.getUserMedia({ audio: true }); recorder.context = new AudioContext(); recorder.source = recorder.context.createMediaStreamSource(recorder.stream); recorder.processor = recorder.context.createScriptProcessor(4096, 1, 1); recorder.gain = recorder.context.createGain(); recorder.gain.gain.value = 0; recorder.chunks = [];
       recorder.processor.onaudioprocess = event => recorder.chunks.push(new Float32Array(event.inputBuffer.getChannelData(0))); recorder.source.connect(recorder.processor); recorder.processor.connect(recorder.gain); recorder.gain.connect(recorder.context.destination); recorder.startedAt = Date.now(); recorder.timer = setInterval(updateRecordingUi, 500); updateRecordingUi();
@@ -413,6 +418,19 @@
   function hideResult() { $("result-card").classList.add("hidden"); }
   async function loadPending() { const box = $("pending-list"); try { const items = await (await api("/users/pending")).json(); if (!items.length) { box.innerHTML = '<div class="empty" style="min-height:100px">대기 중인 가입 요청이 없습니다.</div>'; return; } box.innerHTML = items.map(user => `<div class="admin-row"><div><b>${escapeHtml(user.username)}</b><div class="muted small">${escapeHtml(user.department)} · ${escapeHtml(user.role)}</div></div><div><button class="secondary" type="button" onclick="decide(${user.id}, 'approve')">승인</button> <button class="danger" type="button" onclick="decide(${user.id}, 'reject')">거절</button></div></div>`).join(""); } catch (error) { box.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`; } }
   async function decide(id, action) { try { await api(`/users/${id}/${action}`, { method: "POST" }); await loadPending(); } catch (error) { alert(error.message); } }
+  async function restoreSession() {
+    if (!token) return;
+    try {
+      await loadMe();
+    } catch (_) {
+      sessionStorage.removeItem("noting_token");
+      token = null;
+      me = null;
+      $("app-view").classList.add("hidden");
+      $("auth-view").classList.remove("hidden");
+    }
+  }
+  void restoreSession();
 </script>
 </body>
 </html>
