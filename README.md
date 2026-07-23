@@ -238,7 +238,7 @@ uv run uvicorn app.main:app --reload
 | `POST` | `/transcripts` | 텍스트 회의록 생성 및 마스킹 |
 | `POST` | `/transcripts/upload` | 음성 업로드, STT 및 마스킹 |
 | `PUT` | `/transcripts/{id}` | 검토한 회의록 저장 |
-| `GET` | `/transcripts/{id}/analysis` | 요약·업무 추출 및 RAG 인덱싱 |
+| `POST` | `/transcripts/{id}/analysis` | 요약·업무 추출 및 RAG 인덱싱 |
 | `POST` | `/transcripts/search` | 같은 부서 회의록 검색 |
 | `POST` | `/transcripts/ask` | 근거 기반 회의록 Q&A |
 | `GET` | `/transcripts/{id}/tasks` | 추출된 업무 조회 |

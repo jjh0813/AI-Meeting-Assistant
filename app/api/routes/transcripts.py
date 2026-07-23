@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 
@@ -30,6 +32,82 @@ router = APIRouter(prefix="/transcripts", tags=["transcripts"])
 
 MIN_TASK_DUPLICATE_SIMILARITY = 0.75
 MEETING_ONLY_MESSAGE = "Noting은 내 부서 회의록과 업무 관련 질문만 답할 수 있습니다."
+MAX_AUDIO_BYTES = 25 * 1024 * 1024
+ALLOWED_AUDIO_EXTENSIONS = {
+    ".aac",
+    ".flac",
+    ".m4a",
+    ".mp3",
+    ".mp4",
+    ".ogg",
+    ".wav",
+    ".webm",
+}
+ALLOWED_AUDIO_CONTENT_TYPES = {
+    "audio/aac",
+    "audio/flac",
+    "audio/m4a",
+    "audio/mp4",
+    "audio/mpeg",
+    "audio/ogg",
+    "audio/wav",
+    "audio/webm",
+    "audio/x-m4a",
+    "audio/x-wav",
+    "video/mp4",
+    "video/webm",
+}
+
+
+def read_audio_upload(file: UploadFile) -> bytes:
+    filename = file.filename or ""
+    extension = Path(filename).suffix.lower()
+    content_type = (file.content_type or "").lower()
+    if (
+        extension not in ALLOWED_AUDIO_EXTENSIONS
+        and content_type not in ALLOWED_AUDIO_CONTENT_TYPES
+    ):
+        raise HTTPException(
+            status_code=415,
+            detail="지원하지 않는 파일 형식입니다. WAV, MP3, M4A 등 음성 파일을 업로드해 주세요.",
+        )
+    audio_bytes = file.file.read(MAX_AUDIO_BYTES + 1)
+    if not audio_bytes:
+        raise HTTPException(status_code=422, detail="비어 있는 음성 파일입니다.")
+    if len(audio_bytes) > MAX_AUDIO_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="음성 파일은 25MB 이하만 업로드할 수 있습니다.",
+        )
+    return audio_bytes
+
+
+def serialize_action_item(item) -> dict:
+    return {
+        "id": item.id,
+        "task": item.task,
+        "assignee": item.assignee,
+        "due": item.due,
+        "request": item.request,
+        "status": item.status.value,
+        "superseded_by_id": item.superseded_by_id,
+    }
+
+
+def stored_analysis(db: Session, current_user: User, transcript_id: int):
+    transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
+    if transcript is None:
+        raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
+    if transcript.summary is None:
+        raise HTTPException(
+            status_code=409,
+            detail="보고서를 만들기 전에 회의록을 분석해 주세요.",
+        )
+    items = transcript_repo.get_action_items(db, current_user, transcript_id)
+    return transcript, {
+        "summary": transcript.summary,
+        "tasks": [serialize_action_item(item) for item in items],
+    }
 
 
 def find_rag_sources(
@@ -227,7 +305,7 @@ def summarize_transcript(
     return {"id": transcript.id, "summary": summary}
 
 
-@router.get("/{transcript_id}/analysis")
+@router.post("/{transcript_id}/analysis")
 def analyze_transcript(
     transcript_id: int,
     current_user: User = Depends(get_approved_user),
@@ -275,10 +353,11 @@ def analyze_transcript(
         embedding,
         indexed_chunks,
     )
+    saved_items = transcript_repo.get_action_items(db, current_user, transcript.id)
     return {
         "id": transcript.id,
         "summary": result["summary"],
-        "tasks": result["tasks"],
+        "tasks": [serialize_action_item(item) for item in saved_items],
         "indexed_chunks": len(indexed_chunks),
         "indexed_tasks": sum(
             1 for task in indexed_tasks if task["task_embedding"] is not None
@@ -299,18 +378,7 @@ def get_transcript_tasks(
     return {
         "id": transcript.id,
         "summary": transcript.summary,
-        "tasks": [
-            {
-                "id": i.id,
-                "task": i.task,
-                "assignee": i.assignee,
-                "due": i.due,
-                "request": i.request,
-                "status": i.status.value,
-                "superseded_by_id": i.superseded_by_id,
-            }
-            for i in items
-        ],
+        "tasks": [serialize_action_item(item) for item in items],
     }
 
 
@@ -532,10 +600,7 @@ def get_text_report(
     current_user: User = Depends(get_approved_user),
     db: Session = Depends(get_db),
 ):
-    transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
-    if transcript is None:
-        raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
-    analysis = analyze(transcript.masked_content)
+    transcript, analysis = stored_analysis(db, current_user, transcript_id)
     return {"id": transcript.id, "report": build_text_report(analysis)}
 
 
@@ -545,10 +610,7 @@ def get_pdf_report(
     current_user: User = Depends(get_approved_user),
     db: Session = Depends(get_db),
 ):
-    transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
-    if transcript is None:
-        raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
-    analysis = analyze(transcript.masked_content)
+    transcript, analysis = stored_analysis(db, current_user, transcript_id)
     content = build_pdf_report(analysis)
     return Response(
         content=content,
@@ -586,7 +648,7 @@ def upload_and_transcribe(
     current_user: User = Depends(get_approved_user),
     db: Session = Depends(get_db),
 ):
-    audio_bytes = file.file.read()
+    audio_bytes = read_audio_upload(file)
     text = transcribe(audio_bytes, file.filename or "audio")
     masked_content, pii_items = mask_text(text)
     transcript = transcript_repo.create_transcript(

@@ -381,13 +381,13 @@
     if (!id) return;
     showResult("AI 분석 중", "<p class='muted'>요약·일정과 변경 후보를 분석하는 중입니다.</p>");
     try {
-      const data = await (await api(`/transcripts/${id}/analysis`)).json();
+      const data = await (await api(`/transcripts/${id}/analysis`, { method: "POST" })).json();
       const scheduleData = await (await api(`/transcripts/${id}/schedule-change-candidates`)).json();
       currentTranscriptId = id;
-      const rows = (data.tasks || []).map(task => `<tr><td>${escapeHtml(task.task || "-")}</td><td>${escapeHtml(task.assignee || "-")}</td><td>${escapeHtml(task.due || "-")}</td><td>${escapeHtml(task.request || "-")}</td></tr>`).join("") || "<tr><td colspan='4'>추출된 일정이 없습니다.</td></tr>";
+      const rows = (data.tasks || []).map(task => `<tr><td>${escapeHtml(task.task || "-")}</td><td>${escapeHtml(task.assignee || "-")}</td><td>${escapeHtml(task.due || "-")}</td><td>${escapeHtml(task.request || "-")}</td><td id="task-status-${task.id}">${escapeHtml(task.status || "대기")}</td><td><button class="secondary" type="button" onclick="updateTaskStatus(${id}, ${task.id}, '대기')">대기</button> <button class="secondary" type="button" onclick="updateTaskStatus(${id}, ${task.id}, '진행중')">진행</button> <button class="secondary" type="button" onclick="updateTaskStatus(${id}, ${task.id}, '완료')">완료</button></td></tr>`).join("") || "<tr><td colspan='6'>추출된 일정이 없습니다.</td></tr>";
       const changes = (scheduleData.change_candidates || []).map(change => `<div class="event"><span class="event-info"><span class="event-name">${escapeHtml(change.task.task)}</span><span class="event-meta">${escapeHtml(change.previous_task.due)} → ${escapeHtml(change.task.due)} · 유사도 ${change.similarity}</span></span><button class="secondary" type="button" onclick="confirmScheduleChange(${id}, ${change.task.id}, ${change.previous_task.id})">일정 변경 확인</button></div>`).join("");
       const changeSection = changes ? `<div style="margin-top:18px"><h4>일정 변경 후보</h4><p class="muted small">확인하면 이전 일정은 기록으로 남고 다가오는 이벤트에서는 새 일정만 표시됩니다.</p><div class="event-list">${changes}</div></div>` : "";
-      showResult(`회의록 #${id} 분석 결과`, `<pre>${escapeHtml(data.summary || "요약이 없습니다.")}</pre><table><tr><th>할 일</th><th>담당자</th><th>기한</th><th>요청사항</th></tr>${rows}</table>${changeSection}`);
+      showResult(`회의록 #${id} 분석 결과`, `<pre>${escapeHtml(data.summary || "요약이 없습니다.")}</pre><table><tr><th>할 일</th><th>담당자</th><th>기한</th><th>요청사항</th><th>상태</th><th>상태 변경</th></tr>${rows}</table>${changeSection}`);
       await refreshDashboard();
     } catch (error) {
       showResult("분석 오류", `<p class="error">${escapeHtml(error.message)}</p>`);
@@ -400,6 +400,16 @@
       await refreshDashboard();
     } catch (error) {
       showResult("일정 변경 오류", `<p class="error">${escapeHtml(error.message)}</p>`);
+    }
+  }
+  async function updateTaskStatus(transcriptId, taskId, status) {
+    try {
+      const result = await (await api(`/transcripts/${transcriptId}/tasks/${taskId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) })).json();
+      const cell = $(`task-status-${taskId}`);
+      if (cell) cell.textContent = result.status;
+      await refreshDashboard();
+    } catch (error) {
+      showResult("업무 상태 변경 오류", `<p class="error">${escapeHtml(error.message)}</p>`);
     }
   }
   async function askMeetingAssistant() {

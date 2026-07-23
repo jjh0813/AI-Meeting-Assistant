@@ -2,6 +2,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
+from app.api.routes.transcripts import router as transcript_router
 from app.main import app
 
 
@@ -22,6 +23,18 @@ class MainRouteTests(unittest.TestCase):
         self.assertIn("아이디를 입력하세요", response.text)
         self.assertIn('sessionStorage.getItem("noting_token")', response.text)
         self.assertIn("HTTPS", response.text)
+        self.assertIn("updateTaskStatus", response.text)
+        self.assertIn('method: "PATCH"', response.text)
+
+    def test_analysis_endpoint_uses_post(self):
+        route = next(
+            route
+            for route in transcript_router.routes
+            if getattr(route, "path", None) == "/transcripts/{transcript_id}/analysis"
+        )
+
+        self.assertIn("POST", route.methods)
+        self.assertNotIn("GET", route.methods)
 
 
 if __name__ == "__main__":
