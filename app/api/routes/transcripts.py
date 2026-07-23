@@ -19,20 +19,29 @@ from app.services.masking import mask_text
 from app.services.qa import answer_from_meetings
 from app.services.question_guard import guard_meeting_question
 from app.services.report import build_pdf_report, build_text_report
+from app.services.retrieval import (
+    answer_indicates_missing_evidence,
+    has_sufficient_evidence,
+    rerank_sources,
+)
 from app.services.stt import transcribe
 
 router = APIRouter(prefix="/transcripts", tags=["transcripts"])
 
-MIN_RAG_SIMILARITY = 0.60
 MIN_TASK_DUPLICATE_SIMILARITY = 0.75
 MEETING_ONLY_MESSAGE = "Noting은 내 부서 회의록과 업무 관련 질문만 답할 수 있습니다."
 
 
 def find_rag_sources(
-    db: Session, current_user: User, query_embedding: list[float], limit: int
+    db: Session,
+    current_user: User,
+    query: str,
+    query_embedding: list[float],
+    limit: int,
 ) -> list[dict]:
+    candidate_limit = min(max(limit * 4, 20), 100)
     chunk_matches = transcript_repo.search_similar_chunks(
-        db, current_user, query_embedding, limit
+        db, current_user, query_embedding, candidate_limit
     )
     chunk_sources = [
         {
@@ -50,7 +59,7 @@ def find_rag_sources(
         for chunk, transcript, distance in chunk_matches
     ]
     summary_matches = transcript_repo.search_similar_summaries(
-        db, current_user, query_embedding, limit
+        db, current_user, query_embedding, candidate_limit
     )
     chunk_transcript_ids = {source["id"] for source in chunk_sources}
     summary_sources = [
@@ -69,11 +78,7 @@ def find_rag_sources(
         for transcript, distance in summary_matches
         if transcript.id not in chunk_transcript_ids
     ]
-    return sorted(
-        chunk_sources + summary_sources,
-        key=lambda source: source["similarity"],
-        reverse=True,
-    )[:limit]
+    return rerank_sources(query, chunk_sources + summary_sources, limit)
 
 
 @router.post("")
@@ -126,7 +131,9 @@ def search_transcripts(
             detail="검색용 임베딩을 생성하지 못했습니다. Ollama 임베딩 모델 상태를 확인해 주세요.",
         )
 
-    results = find_rag_sources(db, current_user, query_embedding, body.limit)
+    results = find_rag_sources(
+        db, current_user, query, query_embedding, body.limit
+    )
     return {
         "query": query,
         "results": results,
@@ -163,8 +170,10 @@ def ask_about_meetings(
 
     sources = [
         source
-        for source in find_rag_sources(db, current_user, query_embedding, limit=3)
-        if source["similarity"] >= MIN_RAG_SIMILARITY
+        for source in find_rag_sources(
+            db, current_user, question, query_embedding, limit=3
+        )
+        if has_sufficient_evidence(source)
     ]
     if not sources:
         return {
@@ -175,8 +184,17 @@ def ask_about_meetings(
             "blocked_reason": "low_similarity",
         }
 
+    answer = answer_from_meetings(question, sources)
+    if answer_indicates_missing_evidence(answer):
+        return {
+            "answer": answer,
+            "sources": [],
+            "grounded": False,
+            "blocked": True,
+            "blocked_reason": "insufficient_context",
+        }
     return {
-        "answer": answer_from_meetings(question, sources),
+        "answer": answer,
         "sources": sources,
         "grounded": True,
         "blocked": False,
