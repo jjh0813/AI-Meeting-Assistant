@@ -10,5 +10,6 @@ wheels/
 .venv
 .env
 
-# Docs (일일 보고서 등 로컬 문서)
+# Local documents and generated reports
 docs/
+docs_output/
