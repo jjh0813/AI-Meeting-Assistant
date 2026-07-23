@@ -12,6 +12,7 @@ class ActionItemStatus(str, enum.Enum):
     pending = "대기"
     in_progress = "진행중"
     completed = "완료"
+    superseded = "변경됨"
 
 
 class Transcript(Base):
@@ -50,6 +51,11 @@ class ActionItem(Base):
         Enum(ActionItemStatus), nullable=False, default=ActionItemStatus.pending
     )
     task_embedding = Column(Vector(768), nullable=True)
+    superseded_by_id = Column(
+        Integer,
+        ForeignKey("action_items.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

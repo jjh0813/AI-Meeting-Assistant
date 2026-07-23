@@ -113,34 +113,45 @@ def save_analysis(
 ):
     transcript.summary = summary
     transcript.summary_embedding = embedding
-    existing_statuses = {
-        (item.task.strip(), item.assignee.strip()): item.status
-        for item in db.query(ActionItem)
+    existing_items: dict[tuple[str, str], list[ActionItem]] = {}
+    for item in (
+        db.query(ActionItem)
         .filter(ActionItem.transcript_id == transcript.id)
         .all()
-    }
-    db.query(ActionItem).filter(
-        ActionItem.transcript_id == transcript.id
-    ).delete()
+    ):
+        key = (item.task.strip(), item.assignee.strip())
+        existing_items.setdefault(key, []).append(item)
+
     for t in tasks:
-        db.add(
-            ActionItem(
-                transcript_id=transcript.id,
-                department=transcript.department,
-                task=t.get("task", "") or "",
-                assignee=t.get("assignee", "") or "",
-                due=t.get("due", "") or "",
-                request=t.get("request", "") or "",
-                status=existing_statuses.get(
-                    (
-                        (t.get("task", "") or "").strip(),
-                        (t.get("assignee", "") or "").strip(),
-                    ),
-                    ActionItemStatus.pending,
-                ),
-                task_embedding=t.get("task_embedding"),
-            )
+        key = (
+            (t.get("task", "") or "").strip(),
+            (t.get("assignee", "") or "").strip(),
         )
+        matching_items = existing_items.get(key, [])
+        if matching_items:
+            action_item = matching_items.pop(0)
+            action_item.task = t.get("task", "") or ""
+            action_item.assignee = t.get("assignee", "") or ""
+            action_item.due = t.get("due", "") or ""
+            action_item.request = t.get("request", "") or ""
+            action_item.task_embedding = t.get("task_embedding")
+        else:
+            db.add(
+                ActionItem(
+                    transcript_id=transcript.id,
+                    department=transcript.department,
+                    task=t.get("task", "") or "",
+                    assignee=t.get("assignee", "") or "",
+                    due=t.get("due", "") or "",
+                    request=t.get("request", "") or "",
+                    status=ActionItemStatus.pending,
+                    task_embedding=t.get("task_embedding"),
+                )
+            )
+
+    for remaining_items in existing_items.values():
+        for item in remaining_items:
+            db.delete(item)
     db.query(TranscriptChunk).filter(
         TranscriptChunk.transcript_id == transcript.id
     ).delete()
@@ -189,12 +200,29 @@ def get_action_item(
     )
 
 
+def get_action_item_by_id(
+    db: Session,
+    current_user: User,
+    action_item_id: int,
+):
+    return (
+        db.query(ActionItem)
+        .filter(
+            ActionItem.id == action_item_id,
+            ActionItem.department == current_user.department,
+        )
+        .first()
+    )
+
+
 def update_action_item_status(
     db: Session,
     action_item: ActionItem,
     status: ActionItemStatus,
 ) -> ActionItem:
     action_item.status = status
+    if status != ActionItemStatus.superseded:
+        action_item.superseded_by_id = None
     db.commit()
     db.refresh(action_item)
     return action_item
@@ -215,13 +243,48 @@ def search_similar_action_items(
         .filter(
             ActionItem.department == current_user.department,
             ActionItem.transcript_id != exclude_transcript_id,
-            ActionItem.status != ActionItemStatus.completed,
+            ActionItem.status.notin_(
+                [ActionItemStatus.completed, ActionItemStatus.superseded]
+            ),
             ActionItem.task_embedding.is_not(None),
         )
         .order_by(distance)
         .limit(limit)
         .all()
     )
+
+
+def get_action_item_similarity(
+    db: Session,
+    current_user: User,
+    query_embedding: list[float],
+    candidate_id: int,
+):
+    distance = ActionItem.task_embedding.cosine_distance(query_embedding).label(
+        "distance"
+    )
+    row = (
+        db.query(distance)
+        .filter(
+            ActionItem.id == candidate_id,
+            ActionItem.department == current_user.department,
+            ActionItem.task_embedding.is_not(None),
+        )
+        .first()
+    )
+    return None if row is None else float(row[0])
+
+
+def confirm_schedule_change(
+    db: Session,
+    previous_item: ActionItem,
+    current_item: ActionItem,
+) -> ActionItem:
+    previous_item.status = ActionItemStatus.superseded
+    previous_item.superseded_by_id = current_item.id
+    db.commit()
+    db.refresh(previous_item)
+    return previous_item
 
 
 def search_similar_summaries(

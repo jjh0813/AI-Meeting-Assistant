@@ -7,11 +7,17 @@ STATEMENTS = (
     """
     DO $$
     BEGIN
-        CREATE TYPE actionitemstatus AS ENUM ('pending', 'in_progress', 'completed');
+        CREATE TYPE actionitemstatus AS ENUM (
+            'pending', 'in_progress', 'completed', 'superseded'
+        );
     EXCEPTION
         WHEN duplicate_object THEN NULL;
     END
     $$;
+    """,
+    """
+    ALTER TYPE actionitemstatus
+    ADD VALUE IF NOT EXISTS 'superseded'
     """,
     """
     ALTER TABLE action_items
@@ -30,6 +36,23 @@ STATEMENTS = (
     """
     ALTER TABLE action_items
     ADD COLUMN IF NOT EXISTS task_embedding vector(768)
+    """,
+    """
+    ALTER TABLE action_items
+    ADD COLUMN IF NOT EXISTS superseded_by_id integer
+    """,
+    """
+    DO $$
+    BEGIN
+        ALTER TABLE action_items
+        ADD CONSTRAINT fk_action_items_superseded_by
+        FOREIGN KEY (superseded_by_id)
+        REFERENCES action_items(id)
+        ON DELETE SET NULL;
+    EXCEPTION
+        WHEN duplicate_object THEN NULL;
+    END
+    $$;
     """,
 )
 

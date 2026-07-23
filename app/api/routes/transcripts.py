@@ -289,6 +289,7 @@ def get_transcript_tasks(
                 "due": i.due,
                 "request": i.request,
                 "status": i.status.value,
+                "superseded_by_id": i.superseded_by_id,
             }
             for i in items
         ],
@@ -332,7 +333,7 @@ def find_task_duplicates(
     results = []
     for item in items:
         if (
-            item.status == ActionItemStatus.completed
+            item.status in (ActionItemStatus.completed, ActionItemStatus.superseded)
             or item.task_embedding is None
         ):
             continue
@@ -374,6 +375,136 @@ def find_task_duplicates(
         "transcript_id": transcript_id,
         "duplicate_groups": results,
         "threshold": MIN_TASK_DUPLICATE_SIMILARITY,
+    }
+
+
+@router.get("/{transcript_id}/schedule-change-candidates")
+def find_schedule_change_candidates(
+    transcript_id: int,
+    current_user: User = Depends(get_approved_user),
+    db: Session = Depends(get_db),
+):
+    transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
+    if transcript is None:
+        raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
+
+    items = transcript_repo.get_action_items(db, current_user, transcript_id)
+    candidates = []
+    for item in items:
+        if (
+            item.status in (ActionItemStatus.completed, ActionItemStatus.superseded)
+            or item.task_embedding is None
+            or not item.due.strip()
+        ):
+            continue
+        matches = transcript_repo.search_similar_action_items(
+            db,
+            current_user,
+            item.task_embedding,
+            exclude_transcript_id=transcript_id,
+        )
+        for previous, distance in matches:
+            similarity = 1 - float(distance)
+            if (
+                similarity < MIN_TASK_DUPLICATE_SIMILARITY
+                or (
+                    previous.created_at is not None
+                    and item.created_at is not None
+                    and previous.created_at >= item.created_at
+                )
+                or not previous.due.strip()
+                or previous.due.strip() == item.due.strip()
+            ):
+                continue
+            candidates.append(
+                {
+                    "task": {
+                        "id": item.id,
+                        "task": item.task,
+                        "assignee": item.assignee,
+                        "due": item.due,
+                    },
+                    "previous_task": {
+                        "id": previous.id,
+                        "transcript_id": previous.transcript_id,
+                        "task": previous.task,
+                        "assignee": previous.assignee,
+                        "due": previous.due,
+                        "status": previous.status.value,
+                    },
+                    "similarity": round(similarity, 4),
+                }
+            )
+    return {
+        "transcript_id": transcript_id,
+        "change_candidates": candidates,
+        "threshold": MIN_TASK_DUPLICATE_SIMILARITY,
+    }
+
+
+@router.post(
+    "/{transcript_id}/tasks/{task_id}/schedule-changes/{previous_task_id}/confirm"
+)
+def confirm_task_schedule_change(
+    transcript_id: int,
+    task_id: int,
+    previous_task_id: int,
+    current_user: User = Depends(get_approved_user),
+    db: Session = Depends(get_db),
+):
+    current_item = transcript_repo.get_action_item(
+        db, current_user, transcript_id, task_id
+    )
+    if current_item is None:
+        raise HTTPException(status_code=404, detail="새 업무를 찾을 수 없습니다.")
+    previous_item = transcript_repo.get_action_item_by_id(
+        db, current_user, previous_task_id
+    )
+    if previous_item is None:
+        raise HTTPException(status_code=404, detail="이전 업무를 찾을 수 없습니다.")
+    if previous_item.transcript_id == transcript_id:
+        raise HTTPException(status_code=400, detail="같은 회의의 업무는 변경 대상으로 지정할 수 없습니다.")
+    if (
+        previous_item.created_at is not None
+        and current_item.created_at is not None
+        and previous_item.created_at >= current_item.created_at
+    ):
+        raise HTTPException(status_code=400, detail="이전 회의에서 생성된 업무만 변경 대상으로 지정할 수 있습니다.")
+    if (
+        current_item.status in (ActionItemStatus.completed, ActionItemStatus.superseded)
+        or previous_item.status
+        in (ActionItemStatus.completed, ActionItemStatus.superseded)
+    ):
+        raise HTTPException(status_code=400, detail="완료되거나 이미 변경된 업무입니다.")
+    if (
+        not current_item.due.strip()
+        or not previous_item.due.strip()
+        or current_item.due.strip() == previous_item.due.strip()
+    ):
+        raise HTTPException(status_code=400, detail="서로 다른 기존·신규 기한이 필요합니다.")
+    if current_item.task_embedding is None:
+        raise HTTPException(status_code=400, detail="새 업무의 임베딩이 없습니다. 회의록을 다시 분석해 주세요.")
+
+    distance = transcript_repo.get_action_item_similarity(
+        db,
+        current_user,
+        current_item.task_embedding,
+        previous_item.id,
+    )
+    similarity = None if distance is None else 1 - distance
+    if similarity is None or similarity < MIN_TASK_DUPLICATE_SIMILARITY:
+        raise HTTPException(status_code=400, detail="일정 변경으로 확인할 만큼 유사한 업무가 아닙니다.")
+
+    updated_previous = transcript_repo.confirm_schedule_change(
+        db, previous_item, current_item
+    )
+    return {
+        "previous_task_id": updated_previous.id,
+        "previous_due": updated_previous.due,
+        "new_task_id": current_item.id,
+        "new_due": current_item.due,
+        "similarity": round(similarity, 4),
+        "status": updated_previous.status.value,
     }
 
 

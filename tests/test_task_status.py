@@ -16,6 +16,11 @@ class ActionItemStatusTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             ActionItemStatusUpdate(status="취소")
 
+    def test_superseded_is_internal_status(self):
+        self.assertEqual(ActionItemStatus.superseded.value, "변경됨")
+        with self.assertRaises(ValidationError):
+            ActionItemStatusUpdate(status="변경됨")
+
 
 if __name__ == "__main__":
     unittest.main()
