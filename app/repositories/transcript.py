@@ -70,6 +70,10 @@ def update_transcript(
         return None
 
     transcript.masked_content = masked_content
+    # The previous analysis describes the old text, so it must never remain
+    # searchable or be shown as current after the user edits a meeting.
+    transcript.summary = None
+    transcript.summary_embedding = None
     db.query(PiiEntry).filter(
         PiiEntry.transcript_id == transcript_id,
         PiiEntry.department == current_user.department,
@@ -83,6 +87,7 @@ def update_transcript(
                 original_value=item["original_value"],
             )
         )
+    db.query(ActionItem).filter(ActionItem.transcript_id == transcript_id).delete()
     db.commit()
     db.refresh(transcript)
     return transcript

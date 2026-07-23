@@ -5,14 +5,22 @@ from app.api.deps import get_approved_user, get_current_admin
 from app.core.database import get_db
 from app.models.user import User
 from app.repositories import transcript as transcript_repo
-from app.schemas.transcript import TranscriptCreate, TranscriptSearchRequest
+from app.schemas.transcript import (
+    TranscriptCreate,
+    TranscriptQuestionRequest,
+    TranscriptSearchRequest,
+)
 from app.services.analyzer import analyze, summarize
 from app.services.embedding import embed
 from app.services.masking import mask_text
+from app.services.qa import answer_from_meetings
 from app.services.report import build_pdf_report, build_text_report
 from app.services.stt import transcribe
 
 router = APIRouter(prefix="/transcripts", tags=["transcripts"])
+
+MIN_RAG_SIMILARITY = 0.55
+MEETING_ONLY_MESSAGE = "Noting은 내 부서 회의록과 업무 관련 질문만 답할 수 있습니다."
 
 
 @router.post("")
@@ -82,6 +90,52 @@ def search_transcripts(
             }
             for transcript, distance in matches
         ],
+    }
+
+
+@router.post("/ask")
+def ask_about_meetings(
+    body: TranscriptQuestionRequest,
+    current_user: User = Depends(get_approved_user),
+    db: Session = Depends(get_db),
+):
+    question = body.question.strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="질문을 입력해 주세요.")
+
+    query_embedding = embed(question)
+    if query_embedding is None:
+        raise HTTPException(
+            status_code=503,
+            detail="검색용 임베딩을 생성하지 못했습니다. Ollama 임베딩 모델 상태를 확인해 주세요.",
+        )
+
+    matches = transcript_repo.search_similar_summaries(
+        db, current_user, query_embedding, limit=3
+    )
+    sources = [
+        {
+            "id": transcript.id,
+            "summary": transcript.summary,
+            "similarity": round(1 - float(distance), 4),
+            "created_at": transcript.created_at.isoformat()
+            if transcript.created_at
+            else None,
+        }
+        for transcript, distance in matches
+        if 1 - float(distance) >= MIN_RAG_SIMILARITY
+    ]
+    if not sources:
+        return {
+            "answer": MEETING_ONLY_MESSAGE,
+            "sources": [],
+            "grounded": False,
+        }
+
+    return {
+        "answer": answer_from_meetings(question, sources),
+        "sources": sources,
+        "grounded": True,
     }
 
 
@@ -201,6 +255,7 @@ def update_transcript(
         "id": transcript.id,
         "department": transcript.department.value,
         "masked_content": transcript.masked_content,
+        "analysis_required": True,
     }
 
 

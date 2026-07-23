@@ -8,3 +8,7 @@ class TranscriptCreate(BaseModel):
 class TranscriptSearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     limit: int = Field(default=5, ge=1, le=20)
+
+
+class TranscriptQuestionRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)

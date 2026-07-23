@@ -123,6 +123,12 @@
   .review-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 11px; }
   .result-card { margin-top: 18px; padding: 20px; }
   .result-card pre { margin: 0; white-space: pre-wrap; font-family: inherit; line-height: 1.65; }
+  .qa-card { grid-column: 1 / -1; padding: 20px; }
+  .qa-form { display: flex; gap: 9px; }
+  .qa-form input { flex: 1; }
+  .qa-answer { margin-top: 15px; padding: 15px; background: #f7f9fd; border: 1px solid #e7edf5; border-radius: 12px; line-height: 1.65; white-space: pre-wrap; }
+  .qa-sources { display: grid; gap: 7px; margin-top: 12px; }
+  .qa-source { width: 100%; padding: 10px 12px; border: 1px solid #e1e8f2; border-radius: 10px; background: #fff; color: #4c5c74; text-align: left; font-size: 12px; }
   table { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 12px; }
   th, td { border: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
   th { color: #526074; background: #f4f7fb; }
@@ -172,6 +178,7 @@
         <nav class="nav">
           <div class="nav-title">Workspace</div>
           <button class="nav-item active" type="button" onclick="scrollToSection('dashboard-top')">⌂&nbsp; 대시보드</button>
+          <button class="nav-item" type="button" onclick="scrollToSection('qa-section')">✦&nbsp; 회의록 AI</button>
           <button class="nav-item" type="button" onclick="scrollToSection('recent-section')">▤&nbsp; 최근 회의록</button>
           <button class="nav-item" type="button" onclick="scrollToSection('composer-section')">＋&nbsp; 새 회의록</button>
           <div id="admin-nav" class="hidden"><div class="nav-title">관리자</div><button class="nav-item" type="button" onclick="scrollToSection('admin-section')">✓&nbsp; 가입 승인</button></div>
@@ -207,6 +214,12 @@
             <section class="card section-card">
               <div class="section-head"><div><h3>다가오는 이벤트</h3><p>회의에서 추출한 기한 기준</p></div></div>
               <div id="event-list" class="event-list"></div>
+            </section>
+
+            <section id="qa-section" class="card qa-card">
+              <div class="section-head"><div><h3>회의록 AI</h3><p>내 부서의 분석 완료 회의록을 근거로만 답합니다.</p></div></div>
+              <div class="qa-form"><input id="qa-question" placeholder="예: 지난 회의에서 배포 일정은 어떻게 정했어?" onkeydown="if (event.key === 'Enter') askMeetingAssistant()" /><button id="qa-submit" class="primary" type="button" onclick="askMeetingAssistant()">질문하기</button></div>
+              <div id="qa-result" class="hidden"></div>
             </section>
 
             <section id="recent-section" class="card section-card recent">
@@ -357,8 +370,18 @@
 
   function openReview(id, content) { currentTranscriptId = id; $("review-card").classList.remove("hidden"); $("review-content").value = content || ""; $("review-card").scrollIntoView({ behavior: "smooth", block: "start" }); }
   async function openTranscript(id) { const item = transcripts.find(transcript => transcript.id === id); openReview(id, item?.masked_content || ""); }
-  async function saveReview() { if (!currentTranscriptId) return; try { const data = await (await api(`/transcripts/${currentTranscriptId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: $("review-content").value }) })).json(); $("review-content").value = data.masked_content; setMessage("new-message", "검토한 회의록을 다시 마스킹해 저장했습니다.", "success"); await refreshDashboard(); } catch (error) { showResult("저장 오류", `<p class="error">${escapeHtml(error.message)}</p>`); } }
+  async function saveReview() { if (!currentTranscriptId) return; try { const data = await (await api(`/transcripts/${currentTranscriptId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: $("review-content").value }) })).json(); $("review-content").value = data.masked_content; setMessage("new-message", "수정본을 저장했습니다. 이전 요약·할 일·검색 벡터는 제거되었으니 ‘요약·일정 분석’을 다시 실행해 주세요.", "success"); await refreshDashboard(); } catch (error) { showResult("저장 오류", `<p class="error">${escapeHtml(error.message)}</p>`); } }
   async function analyze(id) { if (!id) return; showResult("AI 분석 중", "<p class='muted'>요약과 일정 정보를 분석하고 저장하는 중입니다.</p>"); try { const data = await (await api(`/transcripts/${id}/analysis`)).json(); currentTranscriptId = id; const rows = (data.tasks || []).map(task => `<tr><td>${escapeHtml(task.task || "-")}</td><td>${escapeHtml(task.assignee || "-")}</td><td>${escapeHtml(task.due || "-")}</td><td>${escapeHtml(task.request || "-")}</td></tr>`).join("") || "<tr><td colspan='4'>추출된 일정이 없습니다.</td></tr>"; showResult(`회의록 #${id} 분석 결과`, `<pre>${escapeHtml(data.summary || "요약이 없습니다.")}</pre><table><tr><th>할 일</th><th>담당자</th><th>기한</th><th>요청사항</th></tr>${rows}</table>`); await refreshDashboard(); } catch (error) { showResult("분석 오류", `<p class="error">${escapeHtml(error.message)}</p>`); } }
+  async function askMeetingAssistant() {
+    const question = $("qa-question").value.trim(); if (!question) return;
+    const button = $("qa-submit"); const box = $("qa-result"); button.disabled = true; button.textContent = "검색 중..."; box.classList.remove("hidden"); box.innerHTML = '<div class="qa-answer muted">관련 회의록을 찾고 있습니다.</div>';
+    try {
+      const data = await (await api("/transcripts/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question }) })).json();
+      const sources = (data.sources || []).map(source => `<button type="button" class="qa-source" onclick="openTranscript(${source.id})">회의록 #${source.id} · 유사도 ${source.similarity} · ${escapeHtml(source.summary || "요약 없음")}</button>`).join("");
+      box.innerHTML = `<div class="qa-answer">${escapeHtml(data.answer)}</div>${sources ? `<div class="qa-sources"><b class="small">답변 근거</b>${sources}</div>` : ""}`;
+    } catch (error) { box.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`; }
+    finally { button.disabled = false; button.textContent = "질문하기"; }
+  }
   async function viewPii(id) { try { const items = await (await api(`/transcripts/${id}/pii`)).json(); const rows = items.map(item => `<tr><td>${escapeHtml(item.pii_type)}</td><td>${escapeHtml(item.original_value)}</td></tr>`).join("") || "<tr><td colspan='2'>저장된 원본이 없습니다.</td></tr>"; showResult(`회의록 #${id} 개인정보 원본`, `<table><tr><th>유형</th><th>원본 값</th></tr>${rows}</table>`); } catch (error) { showResult("원본 조회 오류", `<p class="error">${escapeHtml(error.message)}</p>`); } }
   async function downloadPdf(id) { try { const response = await api(`/transcripts/${id}/report.pdf`); const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `noting-report-${id}.pdf`; link.click(); URL.revokeObjectURL(url); } catch (error) { showResult("PDF 오류", `<p class="error">${escapeHtml(error.message)}</p>`); } }
   function showResult(title, content) { $("result-card").classList.remove("hidden"); $("result-subtitle").textContent = title; $("result-content").innerHTML = content; $("result-card").scrollIntoView({ behavior: "smooth", block: "start" }); }
