@@ -10,6 +10,7 @@ let currentTranscriptId = null;
 let currentPage = "workspace";
 let detailReturnPage = "workspace";
 let analysisPollId = null;
+let clockTimerId = null;
 let recorder = {
   stream: null,
   context: null,
@@ -56,6 +57,88 @@ function showAuth(tab) {
 function toggleSidebar(open) {
   $("sidebar").classList.toggle("open", open);
   $("mobile-overlay").classList.toggle("hidden", !open);
+}
+
+function updateCurrentClock() {
+  const now = new Date();
+  $("current-date").textContent = now.toLocaleDateString("ko-KR", {
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+  });
+  $("current-time").textContent = now.toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  $("current-clock").dateTime = now.toISOString();
+}
+
+function startCurrentClock() {
+  updateCurrentClock();
+  if (clockTimerId) clearInterval(clockTimerId);
+  clockTimerId = setInterval(updateCurrentClock, 1000);
+}
+
+function upcomingNotifications() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return dashboardTasks
+    .filter(isActiveTask)
+    .map(task => {
+      const due = parseDue(task.due);
+      if (!due) return null;
+      due.setHours(0, 0, 0, 0);
+      const daysUntil = Math.round((due - today) / 86400000);
+      if (daysUntil < 0 || daysUntil > 1) return null;
+      return { ...task, parsedDue: due, daysUntil };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.parsedDue - b.parsedDue || b.id - a.id);
+}
+
+function renderNotifications() {
+  const list = $("notification-list");
+  if (!list) return;
+  const notifications = upcomingNotifications();
+  $("notification-count").textContent = `${notifications.length}개`;
+  $("notification-dot").classList.toggle("hidden", notifications.length === 0);
+  $("notification-button").setAttribute(
+    "aria-label",
+    notifications.length ? `읽지 않은 일정 알림 ${notifications.length}개` : "새 일정 알림 없음",
+  );
+  if (!notifications.length) {
+    list.innerHTML = '<div class="notification-empty">오늘이나 내일로 예정된 일정이 없습니다.</div>';
+    return;
+  }
+  list.innerHTML = notifications.map(item => `
+    <button class="notification-item" type="button" onclick="openNotificationMeeting(${item.transcriptId})">
+      <span class="notification-item-icon" aria-hidden="true">◷</span>
+      <span>
+        <b>${escapeHtml(item.task || "일정")}</b>
+        <em>${item.daysUntil === 1 ? "일정이 하루 앞으로 다가왔습니다." : "일정이 오늘 예정되어 있습니다."}</em>
+        <small>${escapeHtml(item.due || "")} · ${escapeHtml(item.transcriptTitle || `회의록 #${item.transcriptId}`)}</small>
+      </span>
+    </button>
+  `).join("");
+}
+
+function toggleNotifications(event) {
+  event?.stopPropagation();
+  const popover = $("notification-popover");
+  const willOpen = popover.classList.contains("hidden");
+  popover.classList.toggle("hidden", !willOpen);
+  $("notification-button").setAttribute("aria-expanded", String(willOpen));
+}
+
+function closeNotifications() {
+  $("notification-popover")?.classList.add("hidden");
+  $("notification-button")?.setAttribute("aria-expanded", "false");
+}
+
+function openNotificationMeeting(transcriptId) {
+  closeNotifications();
+  openTranscript(transcriptId);
 }
 
 async function api(path, options = {}) {
@@ -137,6 +220,7 @@ async function loadMe() {
   const admin = approved && me.role === "관리자";
   $("admin-nav").classList.toggle("hidden", !admin);
   $("pii-button").classList.toggle("hidden", !admin);
+  startCurrentClock();
   if (approved) await refreshDashboard();
 }
 
@@ -149,6 +233,9 @@ function logout() {
   archivedTranscripts = [];
   archivedTasks = [];
   if (analysisPollId) clearTimeout(analysisPollId);
+  if (clockTimerId) clearInterval(clockTimerId);
+  clockTimerId = null;
+  closeNotifications();
   $("app-view").classList.add("hidden");
   $("auth-view").classList.remove("hidden");
   closeComposer();
@@ -211,6 +298,7 @@ async function refreshDashboard() {
     renderSidebarMeetings();
     renderCalendar();
     renderEvents();
+    renderNotifications();
     renderDateMeetings();
     renderAllMeetings();
     populateTaskOwners();
@@ -1083,5 +1171,12 @@ async function restoreSession() {
     $("auth-view").classList.remove("hidden");
   }
 }
+
+document.addEventListener("click", event => {
+  if (!$("notification-center")?.contains(event.target)) closeNotifications();
+});
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape") closeNotifications();
+});
 
 restoreSession();

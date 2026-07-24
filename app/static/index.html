@@ -107,8 +107,31 @@
         </div>
         <div class="top-actions">
           <span id="approval-badge" class="status-pill">승인됨</span>
-          <button class="button ghost" type="button" onclick="focusAssistant()">⌕ 회의 검색</button>
-          <button class="button primary compact" type="button" onclick="openComposer()">＋ 새 회의</button>
+          <time id="current-clock" class="current-clock" aria-label="현재 시간">
+            <span id="current-date"></span>
+            <strong id="current-time"></strong>
+          </time>
+          <div id="notification-center" class="notification-center">
+            <button
+              id="notification-button"
+              class="notification-button"
+              type="button"
+              aria-label="알림 열기"
+              aria-expanded="false"
+              aria-controls="notification-popover"
+              onclick="toggleNotifications(event)"
+            >
+              <span class="bell-icon" aria-hidden="true"></span>
+              <span id="notification-dot" class="notification-dot hidden"></span>
+            </button>
+            <section id="notification-popover" class="notification-popover hidden" aria-label="다가오는 일정 알림">
+              <div class="notification-head">
+                <div><p class="label-caps teal-text">NOTIFICATIONS</p><h2>알림</h2></div>
+                <span id="notification-count">0개</span>
+              </div>
+              <div id="notification-list" class="notification-list"></div>
+            </section>
+          </div>
         </div>
       </header>
 
