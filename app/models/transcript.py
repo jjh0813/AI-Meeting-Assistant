@@ -1,7 +1,7 @@
 import enum
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, Text
+from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, Text
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -20,6 +20,8 @@ class Transcript(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     department = Column(Enum(Department), nullable=False)
+    title = Column(Text, nullable=True)
+    title_is_manual = Column(Boolean, nullable=False, default=False)
     masked_content = Column(Text, nullable=False)
     summary = Column(Text, nullable=True)
     summary_embedding = Column(Vector(768), nullable=True)

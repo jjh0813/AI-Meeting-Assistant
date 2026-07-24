@@ -19,6 +19,7 @@ class AnalysisTask(BaseModel):
 class AnalysisResult(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    title: str
     summary: str
     tasks: list[AnalysisTask]
 

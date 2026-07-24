@@ -9,7 +9,8 @@ class AnalyzerTests(unittest.TestCase):
     @patch("app.services.analyzer.call_llm")
     def test_valid_analysis_response_is_normalized(self, call_llm):
         call_llm.return_value = (
-            '{"summary":"배포 일정을 확정했다.",'
+            '{"title":"서비스 배포 일정 확정",'
+            '"summary":"배포 일정을 확정했다.",'
             '"tasks":[{"task":"배포","assignee":"[이름]",'
             '"due":"8월 1일","request":"점검"}]}'
         )
@@ -17,6 +18,7 @@ class AnalyzerTests(unittest.TestCase):
         result = analyze("회의 내용")
 
         self.assertEqual(result["summary"], "배포 일정을 확정했다.")
+        self.assertEqual(result["title"], "서비스 배포 일정 확정")
         self.assertEqual(result["tasks"][0]["task"], "배포")
 
     @patch("app.services.analyzer.call_llm", return_value="not-json")
@@ -26,9 +28,17 @@ class AnalyzerTests(unittest.TestCase):
 
     @patch(
         "app.services.analyzer.call_llm",
-        return_value='{"summary":"요약","tasks":"잘못된 형식"}',
+        return_value='{"title":"회의 제목","summary":"요약","tasks":"잘못된 형식"}',
     )
     def test_invalid_task_shape_is_rejected(self, _):
+        with self.assertRaises(ExternalServiceError):
+            analyze("회의 내용")
+
+    @patch(
+        "app.services.analyzer.call_llm",
+        return_value='{"summary":"요약","tasks":[]}',
+    )
+    def test_missing_generated_title_is_rejected(self, _):
         with self.assertRaises(ExternalServiceError):
             analyze("회의 내용")
 

@@ -80,6 +80,8 @@ def update_transcript(
     # searchable or be shown as current after the user edits a meeting.
     transcript.summary = None
     transcript.summary_embedding = None
+    if not transcript.title_is_manual:
+        transcript.title = None
     db.query(PiiEntry).filter(
         PiiEntry.transcript_id == transcript_id,
         PiiEntry.department == current_user.department,
@@ -106,11 +108,14 @@ def update_transcript(
 def save_analysis(
     db: Session,
     transcript: Transcript,
+    title: str,
     summary: str,
     tasks: list[dict],
     embedding,
     chunks: list[dict],
 ):
+    if not transcript.title_is_manual:
+        transcript.title = title.strip() or None
     transcript.summary = summary
     transcript.summary_embedding = embedding
     existing_items: dict[tuple[str, str], list[ActionItem]] = {}
@@ -165,6 +170,18 @@ def save_analysis(
                 embedding=chunk["embedding"],
             )
         )
+    db.commit()
+    db.refresh(transcript)
+    return transcript
+
+
+def update_transcript_title(
+    db: Session,
+    transcript: Transcript,
+    title: str,
+) -> Transcript:
+    transcript.title = title.strip()
+    transcript.title_is_manual = True
     db.commit()
     db.refresh(transcript)
     return transcript

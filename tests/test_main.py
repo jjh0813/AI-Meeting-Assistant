@@ -25,6 +25,10 @@ class MainRouteTests(unittest.TestCase):
         self.assertIn("HTTPS", response.text)
         self.assertIn("updateTaskStatus", response.text)
         self.assertIn('method: "PATCH"', response.text)
+        self.assertIn("autoAnalyzeTranscript", response.text)
+        self.assertIn("selectCalendarDate", response.text)
+        self.assertIn("meeting-detail", response.text)
+        self.assertNotIn("요약·일정 분석</button>", response.text)
 
     def test_analysis_endpoint_uses_post(self):
         route = next(

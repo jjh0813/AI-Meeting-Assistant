@@ -91,6 +91,8 @@
   .calendar-days button.has-event::after { content: ""; position: absolute; left: 50%; bottom: 5px; width: 4px; height: 4px; border-radius: 50%; background: #ff7f8b; transform: translateX(-50%); }
   .calendar-days button.today.has-event::after { background: #fff; }
   .calendar-days button.outside { color: #c6ccd6; }
+  .calendar-days button.selected { color: var(--blue); background: #eaf0ff; box-shadow: inset 0 0 0 2px var(--blue); font-weight: 800; }
+  .calendar-days button.today.selected { color: #fff; background: var(--blue); }
 
   /* Upcoming events / meetings */
   .event-list, .meeting-list { display: grid; gap: 9px; }
@@ -109,6 +111,28 @@
   .meeting-summary { overflow: hidden; margin-top: 4px; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
   .meeting-actions { display: flex; gap: 5px; }
   .meeting-actions button { padding: 7px 9px; background: #f0f4fa; border-radius: 8px; color: #4c5c74; font-size: 12px; font-weight: 700; }
+  .meeting-open { width: 100%; display: grid; grid-template-columns: 54px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 13px 0; border-bottom: 1px solid var(--line); background: transparent; color: inherit; text-align: left; }
+  .meeting-open:last-child { border-bottom: 0; }
+  .analysis-state { display: inline-flex; padding: 5px 8px; border-radius: 999px; background: #e7f7ee; color: var(--success); font-size: 11px; font-weight: 800; }
+  .analysis-state.wait { background: #fff5db; color: #a06100; }
+
+  /* Meeting detail view */
+  .detail-view { display: grid; gap: 18px; }
+  .detail-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .detail-toolbar .back { background: transparent; color: var(--navy); font-weight: 800; padding: 8px 0; }
+  .detail-card { padding: 24px; }
+  .detail-title-row { position: relative; display: flex; align-items: flex-start; gap: 12px; }
+  .detail-title-row h2 { flex: 1; margin: 0; font-size: 25px; letter-spacing: -.6px; }
+  .detail-menu { position: absolute; right: 0; top: 46px; z-index: 5; width: 170px; padding: 7px; border: 1px solid var(--line); border-radius: 11px; background: #fff; box-shadow: var(--shadow); }
+  .detail-menu button { width: 100%; padding: 9px; border-radius: 8px; background: transparent; color: #465164; text-align: left; }
+  .detail-menu button:hover { background: #f3f6fb; }
+  .detail-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+  .detail-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+  .detail-section h3 { margin: 0 0 11px; font-size: 16px; }
+  .detail-summary { padding: 16px; border-radius: 12px; background: #f7f9fd; line-height: 1.7; white-space: pre-wrap; }
+  .detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .title-edit { display: flex; gap: 8px; margin-top: 14px; }
+  .title-edit input { flex: 1; }
 
   /* Input and review areas */
   .composer { grid-column: 1 / -1; padding: 20px; }
@@ -177,10 +201,10 @@
         </div>
         <nav class="nav">
           <div class="nav-title">Workspace</div>
-          <button class="nav-item active" type="button" onclick="scrollToSection('dashboard-top')">⌂&nbsp; 대시보드</button>
-          <button class="nav-item" type="button" onclick="scrollToSection('qa-section')">✦&nbsp; 회의록 AI</button>
-          <button class="nav-item" type="button" onclick="scrollToSection('recent-section')">▤&nbsp; 최근 회의록</button>
-          <button class="nav-item" type="button" onclick="scrollToSection('composer-section')">＋&nbsp; 새 회의록</button>
+          <button class="nav-item active" type="button" onclick="showDashboardAndScroll('dashboard-top')">⌂&nbsp; 대시보드</button>
+          <button class="nav-item" type="button" onclick="showDashboardAndScroll('qa-section')">✦&nbsp; 회의록 AI</button>
+          <button class="nav-item" type="button" onclick="showDashboardAndScroll('date-meetings-section')">▤&nbsp; 날짜별 회의</button>
+          <button class="nav-item" type="button" onclick="showDashboardAndScroll('composer-section')">＋&nbsp; 새 회의록</button>
           <div id="admin-nav" class="hidden"><div class="nav-title">관리자</div><button class="nav-item" type="button" onclick="scrollToSection('admin-section')">✓&nbsp; 가입 승인</button></div>
         </nav>
         <div class="sidebar-actions">
@@ -204,7 +228,7 @@
         </div>
 
         <div id="approved-view">
-          <div class="dashboard-grid">
+          <div id="dashboard-view" class="dashboard-grid">
             <section class="card section-card">
               <div class="section-head"><div><h3>달력</h3><p>추출된 기한을 표시합니다.</p></div><div class="calendar-controls"><button class="mini-btn" type="button" onclick="changeMonth(-1)">‹</button><span id="calendar-month" class="calendar-month"></span><button class="mini-btn" type="button" onclick="changeMonth(1)">›</button></div></div>
               <div class="calendar-week"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
@@ -222,8 +246,8 @@
               <div id="qa-result" class="hidden"></div>
             </section>
 
-            <section id="recent-section" class="card section-card recent">
-              <div class="section-head"><div><h3>최근 회의록</h3><p>내 부서에서 최근에 저장한 회의록입니다.</p></div><button class="secondary" type="button" onclick="refreshDashboard()">목록 새로고침</button></div>
+            <section id="date-meetings-section" class="card section-card recent">
+              <div class="section-head"><div><h3 id="selected-date-title">선택 날짜의 회의</h3><p>달력에서 날짜를 선택하면 해당 날짜에 등록된 회의가 표시됩니다.</p></div><button class="secondary" type="button" onclick="refreshDashboard()">목록 새로고침</button></div>
               <div id="meeting-list" class="meeting-list"></div>
             </section>
 
@@ -236,10 +260,21 @@
             </section>
           </div>
 
-          <section id="review-card" class="card review-card hidden">
-            <h3>STT·회의록 검토</h3><p class="muted small">내용을 확인하고 필요하면 수정한 뒤 저장하세요. 저장 시 다시 마스킹됩니다.</p>
-            <textarea id="review-content"></textarea>
-            <div class="review-actions"><button class="primary" type="button" onclick="saveReview()">수정 내용 저장</button><button class="secondary" type="button" onclick="analyze(currentTranscriptId)">요약·일정 분석</button><button class="secondary" type="button" onclick="downloadPdf(currentTranscriptId)">PDF 보고서</button><button id="pii-button" class="secondary hidden" type="button" onclick="viewPii(currentTranscriptId)">개인정보 원본 보기</button></div>
+          <section id="meeting-detail" class="detail-view hidden">
+            <div class="detail-toolbar"><button class="back" type="button" onclick="showDashboard()">← 대시보드로 돌아가기</button><span id="detail-analysis-state" class="analysis-state"></span></div>
+            <article class="card detail-card">
+              <div class="detail-title-row">
+                <h2 id="detail-title">회의록</h2>
+                <button class="icon-button" type="button" aria-label="회의 메뉴" onclick="toggleDetailMenu()">⋮</button>
+                <div id="detail-menu" class="detail-menu hidden"><button type="button" onclick="showTitleEditor()">제목 수정</button><button type="button" onclick="downloadPdf(currentTranscriptId)">PDF 보고서 다운로드</button></div>
+              </div>
+              <div id="detail-meta" class="detail-meta"></div>
+              <div id="title-edit" class="title-edit hidden"><input id="title-input" maxlength="80" /><button class="primary" type="button" onclick="saveTitle()">저장</button><button class="secondary" type="button" onclick="hideTitleEditor()">취소</button></div>
+              <section class="detail-section"><h3>핵심 요약</h3><div id="detail-summary" class="detail-summary"></div></section>
+              <section class="detail-section"><h3>업무 실행 계획</h3><div id="detail-tasks"></div></section>
+              <section id="detail-changes-section" class="detail-section hidden"><h3>일정 변경 후보</h3><div id="detail-changes" class="event-list"></div></section>
+              <section class="detail-section"><h3>회의록 내용</h3><p class="muted small">내용을 수정해 저장하면 개인정보를 다시 마스킹한 뒤 자동으로 재분석합니다.</p><textarea id="detail-content"></textarea><div class="detail-actions"><button id="detail-save" class="primary" type="button" onclick="saveDetailContent()">수정 내용 저장</button><button class="secondary" type="button" onclick="downloadPdf(currentTranscriptId)">PDF 보고서</button><button id="pii-button" class="secondary hidden" type="button" onclick="viewPii(currentTranscriptId)">개인정보 원본 보기</button></div></section>
+            </article>
           </section>
 
           <section id="result-card" class="card result-card hidden"><div class="section-head"><div><h3>분석 결과</h3><p id="result-subtitle"></p></div><button class="icon-button" type="button" onclick="hideResult()">×</button></div><div id="result-content"></div></section>
@@ -256,6 +291,7 @@
   let transcripts = [];
   let dashboardTasks = [];
   let calendarCursor = new Date();
+  let selectedCalendarDate = new Date();
   let currentTranscriptId = null;
   let recorder = { stream: null, context: null, source: null, processor: null, gain: null, chunks: [], startedAt: null, timer: null };
 
@@ -263,6 +299,7 @@
   function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, char => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "'":"&#39;", '"':"&quot;" })[char]); }
   function showAuth(tab) { $("login-pane").classList.toggle("hidden", tab !== "login"); $("signup-pane").classList.toggle("hidden", tab !== "signup"); $("tab-login").classList.toggle("active", tab === "login"); $("tab-signup").classList.toggle("active", tab === "signup"); }
   function scrollToSection(id) { $(id).scrollIntoView({ behavior: "smooth", block: "start" }); }
+  function showDashboardAndScroll(id) { showDashboard(); scrollToSection(id); }
   function setMessage(id, message, type = "error") { const el = $(id); el.textContent = message; el.className = type; }
   function setComposerMode(mode) { $("text-composer").classList.toggle("hidden", mode !== "text"); $("audio-composer").classList.toggle("hidden", mode !== "audio"); $("text-mode").classList.toggle("active", mode === "text"); $("audio-mode").classList.toggle("active", mode === "audio"); }
 
@@ -304,7 +341,7 @@
       transcripts.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0) || b.id - a.id);
       const taskResults = await Promise.all(transcripts.map(async transcript => { try { return { transcript, data: await (await api(`/transcripts/${transcript.id}/tasks`)).json() }; } catch (_) { return { transcript, data: { tasks: [] } }; } }));
       dashboardTasks = taskResults.flatMap(({ transcript, data }) => (data.tasks || []).map(task => ({ ...task, transcriptId: transcript.id, transcriptText: transcript.masked_content })));
-      renderCalendar(); renderEvents(); renderRecent();
+      renderCalendar(); renderEvents(); renderDateMeetings();
     } catch (error) { showResult("목록을 불러오지 못했습니다", `<p class="error">${escapeHtml(error.message)}</p>`); }
   }
 
@@ -317,15 +354,34 @@
   }
   function dateKey(date) { return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`; }
   function formatShortDate(date) { return `${date.getMonth() + 1}/${date.getDate()}`; }
-  function formatCreated(value) { if (!value) return "최근"; const date = new Date(value); return Number.isNaN(date) ? "최근" : `${date.getMonth() + 1}.${date.getDate()}`; }
+  function formatCreated(value) { if (!value) return "최근"; const date = new Date(value); return Number.isNaN(date.getTime()) ? "최근" : `${date.getMonth() + 1}.${date.getDate()}`; }
   function isActiveTask(task) { return task.status !== "완료" && task.status !== "변경됨"; }
 
-  function changeMonth(direction) { calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + direction, 1); renderCalendar(); }
+  function changeMonth(direction) {
+    calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + direction, 1);
+    selectedCalendarDate = new Date(calendarCursor);
+    renderCalendar();
+    renderDateMeetings();
+  }
+  function selectCalendarDate(year, month, day) {
+    selectedCalendarDate = new Date(year, month, day);
+    calendarCursor = new Date(year, month, 1);
+    renderCalendar();
+    renderDateMeetings();
+    $("date-meetings-section").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   function renderCalendar() {
     $("calendar-month").textContent = `${calendarCursor.getFullYear()}년 ${calendarCursor.getMonth() + 1}월`;
     const first = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth(), 1); const start = new Date(first); start.setDate(1 - first.getDay());
-    const eventDates = new Set(dashboardTasks.filter(isActiveTask).map(task => parseDue(task.due)).filter(Boolean).map(dateKey)); const today = new Date(); let html = "";
-    for (let index = 0; index < 42; index += 1) { const day = new Date(start); day.setDate(start.getDate() + index); const classes = [day.getMonth() !== calendarCursor.getMonth() ? "outside" : "", dateKey(day) === dateKey(today) ? "today" : "", eventDates.has(dateKey(day)) ? "has-event" : ""].filter(Boolean).join(" "); html += `<button type="button" class="${classes}" title="${eventDates.has(dateKey(day)) ? "일정 있음" : ""}">${day.getDate()}</button>`; }
+    const eventDates = new Set(dashboardTasks.filter(isActiveTask).map(task => parseDue(task.due)).filter(Boolean).map(dateKey));
+    const meetingDates = new Set(transcripts.map(item => new Date(item.created_at)).filter(date => !Number.isNaN(date.getTime())).map(dateKey));
+    const today = new Date(); let html = "";
+    for (let index = 0; index < 42; index += 1) {
+      const day = new Date(start); day.setDate(start.getDate() + index);
+      const hasContent = eventDates.has(dateKey(day)) || meetingDates.has(dateKey(day));
+      const classes = [day.getMonth() !== calendarCursor.getMonth() ? "outside" : "", dateKey(day) === dateKey(today) ? "today" : "", dateKey(day) === dateKey(selectedCalendarDate) ? "selected" : "", hasContent ? "has-event" : ""].filter(Boolean).join(" ");
+      html += `<button type="button" class="${classes}" onclick="selectCalendarDate(${day.getFullYear()}, ${day.getMonth()}, ${day.getDate()})" title="${hasContent ? "회의 또는 일정 있음" : ""}">${day.getDate()}</button>`;
+    }
     $("calendar-days").innerHTML = html;
   }
 
@@ -337,15 +393,27 @@
     box.innerHTML = upcoming.map(item => `<button type="button" class="event" onclick="openTranscript(${item.transcriptId})"><span class="event-date">${item.date.getMonth() + 1}월<br>${item.date.getDate()}일</span><span class="event-info"><span class="event-name">${escapeHtml(item.task || "업무 일정")}</span><span class="event-meta">담당 ${escapeHtml(item.assignee || "미지정")} · ${escapeHtml(item.due)}</span></span><span class="muted">›</span></button>`).join("");
   }
 
-  function renderRecent() {
+  function renderDateMeetings() {
     const box = $("meeting-list");
-    if (!transcripts.length) { box.innerHTML = '<div class="empty"><div class="empty-icon">▤</div><div><b>최근 회의가 없습니다.</b></div><div class="small">녹음하거나 음성 파일을 업로드해 첫 회의록을 만들어 보세요.</div></div>'; return; }
-    box.innerHTML = transcripts.slice(0, 6).map(transcript => `<article class="meeting"><div class="meeting-date">${formatCreated(transcript.created_at)}<br>회의록</div><div><div class="meeting-title">회의록 #${transcript.id}</div><div class="meeting-summary">${escapeHtml(transcript.masked_content)}</div></div><div class="meeting-actions"><button type="button" onclick="openTranscript(${transcript.id})">검토</button><button type="button" onclick="analyze(${transcript.id})">분석</button></div></article>`).join("");
+    $("selected-date-title").textContent = `${selectedCalendarDate.getFullYear()}년 ${selectedCalendarDate.getMonth() + 1}월 ${selectedCalendarDate.getDate()}일 회의`;
+    const selected = transcripts.filter(transcript => {
+      const created = new Date(transcript.created_at);
+      return !Number.isNaN(created.getTime()) && dateKey(created) === dateKey(selectedCalendarDate);
+    });
+    if (!selected.length) { box.innerHTML = '<div class="empty"><div class="empty-icon">▤</div><div><b>선택한 날짜에 등록된 회의가 없습니다.</b></div><div class="small">다른 날짜를 선택하거나 새 회의록을 만들어 보세요.</div></div>'; return; }
+    box.innerHTML = selected.map(transcript => `<button type="button" class="meeting-open" onclick="openTranscript(${transcript.id})"><span class="meeting-date">${formatCreated(transcript.created_at)}<br>${escapeHtml(transcript.department)}</span><span><span class="meeting-title">${escapeHtml(transcript.title || `회의록 #${transcript.id}`)}</span><span class="meeting-summary">${escapeHtml(transcript.summary || transcript.masked_content)}</span></span><span class="analysis-state ${transcript.summary ? "" : "wait"}">${transcript.summary ? "분석 완료" : "분석 중"}</span></button>`).join("");
   }
 
   async function saveText() {
     const content = $("new-content").value.trim(); if (!content) { setMessage("new-message", "회의 내용을 입력해 주세요."); return; }
-    try { const data = await (await api("/transcripts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }) })).json(); $("new-content").value = ""; openReview(data.id, data.masked_content); await refreshDashboard(); } catch (error) { setMessage("new-message", error.message); }
+    try {
+      setMessage("new-message", "회의록을 저장하고 AI가 자동으로 분석하고 있습니다.", "success");
+      const data = await (await api("/transcripts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }) })).json();
+      $("new-content").value = "";
+      selectedCalendarDate = new Date(data.created_at || Date.now());
+      calendarCursor = new Date(selectedCalendarDate.getFullYear(), selectedCalendarDate.getMonth(), 1);
+      await autoAnalyzeTranscript(data.id, true);
+    } catch (error) { setMessage("new-message", error.message); }
   }
 
   function chooseAudioFile() { $("audio-file").click(); }
@@ -353,7 +421,13 @@
   async function uploadAudio(file) {
     setComposerMode("audio"); setMessage("new-message", "음성을 텍스트로 변환하는 중입니다. 파일 길이에 따라 시간이 걸릴 수 있습니다.", "success");
     const data = new FormData(); data.append("file", file, file.name);
-    try { const transcript = await (await api("/transcripts/upload", { method: "POST", body: data })).json(); setMessage("new-message", "변환이 완료되었습니다. 아래에서 내용을 검토해 주세요.", "success"); openReview(transcript.id, transcript.masked_content); await refreshDashboard(); } catch (error) { setMessage("new-message", error.message); }
+    try {
+      const transcript = await (await api("/transcripts/upload", { method: "POST", body: data })).json();
+      setMessage("new-message", "음성 변환이 완료되어 AI가 자동으로 분석하고 있습니다.", "success");
+      selectedCalendarDate = new Date(transcript.created_at || Date.now());
+      calendarCursor = new Date(selectedCalendarDate.getFullYear(), selectedCalendarDate.getMonth(), 1);
+      await autoAnalyzeTranscript(transcript.id, true);
+    } catch (error) { setMessage("new-message", error.message); }
   }
 
   async function toggleRecording() { if (recorder.stream) await stopRecording(); else await startRecording(); }
@@ -374,32 +448,111 @@
   }
   function encodeWav(chunks, sampleRate) { const length = chunks.reduce((total, chunk) => total + chunk.length, 0); const buffer = new ArrayBuffer(44 + length * 2); const view = new DataView(buffer); const write = (offset, text) => { for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i)); }; write(0, "RIFF"); view.setUint32(4, 36 + length * 2, true); write(8, "WAVE"); write(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true); write(36, "data"); view.setUint32(40, length * 2, true); let offset = 44; chunks.forEach(chunk => chunk.forEach(sample => { const value = Math.max(-1, Math.min(1, sample)); view.setInt16(offset, value < 0 ? value * 0x8000 : value * 0x7fff, true); offset += 2; })); return new Blob([buffer], { type: "audio/wav" }); }
 
-  function openReview(id, content) { currentTranscriptId = id; $("review-card").classList.remove("hidden"); $("review-content").value = content || ""; $("review-card").scrollIntoView({ behavior: "smooth", block: "start" }); }
-  async function openTranscript(id) { const item = transcripts.find(transcript => transcript.id === id); openReview(id, item?.masked_content || ""); }
-  async function saveReview() { if (!currentTranscriptId) return; try { const data = await (await api(`/transcripts/${currentTranscriptId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: $("review-content").value }) })).json(); $("review-content").value = data.masked_content; setMessage("new-message", "수정본을 저장했습니다. 이전 요약·할 일·검색 벡터는 제거되었으니 ‘요약·일정 분석’을 다시 실행해 주세요.", "success"); await refreshDashboard(); } catch (error) { showResult("저장 오류", `<p class="error">${escapeHtml(error.message)}</p>`); } }
-  async function analyze(id) {
-    if (!id) return;
-    showResult("AI 분석 중", "<p class='muted'>요약·일정과 변경 후보를 분석하는 중입니다.</p>");
+  function showDashboard() {
+    $("meeting-detail").classList.add("hidden");
+    $("dashboard-view").classList.remove("hidden");
+    const isAdmin = me?.status === "승인" && me?.role === "관리자";
+    $("admin-section").classList.toggle("hidden", !isAdmin);
+    $("detail-menu").classList.add("hidden");
+    hideTitleEditor();
+  }
+  async function openTranscript(id) {
+    currentTranscriptId = id;
+    $("dashboard-view").classList.add("hidden");
+    $("admin-section").classList.add("hidden");
+    hideResult();
+    $("meeting-detail").classList.remove("hidden");
+    $("detail-title").textContent = "회의록을 불러오는 중입니다.";
+    $("detail-meta").textContent = "";
+    $("detail-summary").innerHTML = '<span class="muted">저장된 분석 결과를 확인하고 있습니다.</span>';
+    $("detail-tasks").innerHTML = "";
+    $("detail-content").value = "";
+    $("meeting-detail").scrollIntoView({ behavior: "smooth", block: "start" });
     try {
-      const data = await (await api(`/transcripts/${id}/analysis`, { method: "POST" })).json();
-      const scheduleData = await (await api(`/transcripts/${id}/schedule-change-candidates`)).json();
-      currentTranscriptId = id;
-      const rows = (data.tasks || []).map(task => `<tr><td>${escapeHtml(task.task || "-")}</td><td>${escapeHtml(task.assignee || "-")}</td><td>${escapeHtml(task.due || "-")}</td><td>${escapeHtml(task.request || "-")}</td><td id="task-status-${task.id}">${escapeHtml(task.status || "대기")}</td><td><button class="secondary" type="button" onclick="updateTaskStatus(${id}, ${task.id}, '대기')">대기</button> <button class="secondary" type="button" onclick="updateTaskStatus(${id}, ${task.id}, '진행중')">진행</button> <button class="secondary" type="button" onclick="updateTaskStatus(${id}, ${task.id}, '완료')">완료</button></td></tr>`).join("") || "<tr><td colspan='6'>추출된 일정이 없습니다.</td></tr>";
-      const changes = (scheduleData.change_candidates || []).map(change => `<div class="event"><span class="event-info"><span class="event-name">${escapeHtml(change.task.task)}</span><span class="event-meta">${escapeHtml(change.previous_task.due)} → ${escapeHtml(change.task.due)} · 유사도 ${change.similarity}</span></span><button class="secondary" type="button" onclick="confirmScheduleChange(${id}, ${change.task.id}, ${change.previous_task.id})">일정 변경 확인</button></div>`).join("");
-      const changeSection = changes ? `<div style="margin-top:18px"><h4>일정 변경 후보</h4><p class="muted small">확인하면 이전 일정은 기록으로 남고 다가오는 이벤트에서는 새 일정만 표시됩니다.</p><div class="event-list">${changes}</div></div>` : "";
-      showResult(`회의록 #${id} 분석 결과`, `<pre>${escapeHtml(data.summary || "요약이 없습니다.")}</pre><table><tr><th>할 일</th><th>담당자</th><th>기한</th><th>요청사항</th><th>상태</th><th>상태 변경</th></tr>${rows}</table>${changeSection}`);
-      await refreshDashboard();
+      const data = await (await api(`/transcripts/${id}/tasks`)).json();
+      const scheduleData = data.summary ? await (await api(`/transcripts/${id}/schedule-change-candidates`)).json() : { change_candidates: [] };
+      renderMeetingDetail(data, scheduleData);
     } catch (error) {
-      showResult("분석 오류", `<p class="error">${escapeHtml(error.message)}</p>`);
+      $("detail-title").textContent = `회의록 #${id}`;
+      $("detail-summary").innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
     }
+  }
+  function renderMeetingDetail(data, scheduleData = { change_candidates: [] }) {
+    const created = data.created_at ? new Date(data.created_at) : null;
+    $("detail-title").textContent = data.title || `회의록 #${data.id}`;
+    $("title-input").value = data.title || `회의록 #${data.id}`;
+    $("detail-meta").innerHTML = `<span>회의록 #${data.id}</span><span>${escapeHtml(data.department || me?.department || "")}</span><span>${created && !Number.isNaN(created.getTime()) ? created.toLocaleString("ko-KR") : "등록일 미확인"}</span><span>${data.title_is_manual ? "사용자 수정 제목" : "AI 자동 제목"}</span>`;
+    $("detail-analysis-state").textContent = data.summary ? "분석 완료" : "자동 분석 필요";
+    $("detail-analysis-state").classList.toggle("wait", !data.summary);
+    $("detail-summary").innerHTML = data.summary ? escapeHtml(data.summary) : `<span class="muted">자동 분석 결과가 아직 없습니다.</span> <button class="secondary" type="button" onclick="autoAnalyzeTranscript(${data.id}, true)">다시 시도</button>`;
+    $("detail-content").value = data.masked_content || "";
+    const rows = (data.tasks || []).map(task => `<tr><td>${escapeHtml(task.task || "-")}</td><td>${escapeHtml(task.assignee || "-")}</td><td>${escapeHtml(task.due || "-")}</td><td>${escapeHtml(task.request || "-")}</td><td id="task-status-${task.id}">${escapeHtml(task.status || "대기")}</td><td><button class="secondary" type="button" onclick="updateTaskStatus(${data.id}, ${task.id}, '대기')">대기</button> <button class="secondary" type="button" onclick="updateTaskStatus(${data.id}, ${task.id}, '진행중')">진행</button> <button class="secondary" type="button" onclick="updateTaskStatus(${data.id}, ${task.id}, '완료')">완료</button></td></tr>`).join("");
+    $("detail-tasks").innerHTML = rows ? `<table><tr><th>할 일</th><th>담당자</th><th>기한</th><th>요청사항</th><th>상태</th><th>상태 변경</th></tr>${rows}</table>` : '<div class="empty" style="min-height:90px">추출된 업무가 없습니다.</div>';
+    const changes = (scheduleData.change_candidates || []).map(change => `<div class="event"><span class="event-info"><span class="event-name">${escapeHtml(change.task.task)}</span><span class="event-meta">${escapeHtml(change.previous_task.due)} → ${escapeHtml(change.task.due)} · 유사도 ${change.similarity}</span></span><button class="secondary" type="button" onclick="confirmScheduleChange(${data.id}, ${change.task.id}, ${change.previous_task.id})">일정 변경 확인</button></div>`).join("");
+    $("detail-changes-section").classList.toggle("hidden", !changes);
+    $("detail-changes").innerHTML = changes;
+  }
+  async function autoAnalyzeTranscript(id, openAfter = false) {
+    currentTranscriptId = id;
+    if (openAfter) {
+      $("dashboard-view").classList.add("hidden");
+      $("meeting-detail").classList.remove("hidden");
+      $("detail-title").textContent = "AI가 회의 제목을 정하고 있습니다.";
+      $("detail-analysis-state").textContent = "자동 분석 중";
+      $("detail-analysis-state").classList.add("wait");
+      $("detail-summary").innerHTML = '<span class="muted">요약·업무·검색 임베딩을 자동으로 생성하고 있습니다.</span>';
+    }
+    try {
+      await api(`/transcripts/${id}/analysis`, { method: "POST" });
+      setMessage("new-message", "회의록 저장과 자동 분석이 완료되었습니다.", "success");
+      await refreshDashboard();
+      if (openAfter) await openTranscript(id);
+    } catch (error) {
+      await refreshDashboard();
+      if (openAfter) {
+        await openTranscript(id);
+        $("detail-summary").innerHTML = `<p class="error">자동 분석에 실패했습니다: ${escapeHtml(error.message)}</p><button class="secondary" type="button" onclick="autoAnalyzeTranscript(${id}, true)">자동 분석 다시 시도</button>`;
+      }
+      setMessage("new-message", `회의록은 저장됐지만 자동 분석에 실패했습니다: ${error.message}`);
+    }
+  }
+  async function saveDetailContent() {
+    if (!currentTranscriptId) return;
+    const button = $("detail-save");
+    button.disabled = true;
+    button.textContent = "저장 중...";
+    try {
+      const data = await (await api(`/transcripts/${currentTranscriptId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: $("detail-content").value }) })).json();
+      $("detail-content").value = data.masked_content;
+      await autoAnalyzeTranscript(currentTranscriptId, true);
+    } catch (error) {
+      $("detail-summary").innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+    } finally {
+      button.disabled = false;
+      button.textContent = "수정 내용 저장";
+    }
+  }
+  function toggleDetailMenu() { $("detail-menu").classList.toggle("hidden"); }
+  function showTitleEditor() { $("detail-menu").classList.add("hidden"); $("title-edit").classList.remove("hidden"); $("title-input").focus(); }
+  function hideTitleEditor() { $("title-edit").classList.add("hidden"); }
+  async function saveTitle() {
+    const title = $("title-input").value.trim();
+    if (!currentTranscriptId || !title) return;
+    try {
+      const data = await (await api(`/transcripts/${currentTranscriptId}/title`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title }) })).json();
+      $("detail-title").textContent = data.title;
+      hideTitleEditor();
+      await refreshDashboard();
+      await openTranscript(currentTranscriptId);
+    } catch (error) { $("detail-summary").innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`; }
   }
   async function confirmScheduleChange(transcriptId, taskId, previousTaskId) {
     try {
-      const result = await (await api(`/transcripts/${transcriptId}/tasks/${taskId}/schedule-changes/${previousTaskId}/confirm`, { method: "POST" })).json();
-      showResult("일정 변경 완료", `<p>${escapeHtml(result.previous_due)} 일정을 ${escapeHtml(result.new_due)} 일정으로 변경했습니다.</p>`);
+      await api(`/transcripts/${transcriptId}/tasks/${taskId}/schedule-changes/${previousTaskId}/confirm`, { method: "POST" });
       await refreshDashboard();
+      await openTranscript(transcriptId);
     } catch (error) {
-      showResult("일정 변경 오류", `<p class="error">${escapeHtml(error.message)}</p>`);
+      $("detail-changes").innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
     }
   }
   async function updateTaskStatus(transcriptId, taskId, status) {
@@ -408,8 +561,9 @@
       const cell = $(`task-status-${taskId}`);
       if (cell) cell.textContent = result.status;
       await refreshDashboard();
+      await openTranscript(transcriptId);
     } catch (error) {
-      showResult("업무 상태 변경 오류", `<p class="error">${escapeHtml(error.message)}</p>`);
+      $("detail-tasks").innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
     }
   }
   async function askMeetingAssistant() {

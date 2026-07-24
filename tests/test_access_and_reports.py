@@ -27,7 +27,9 @@ class AccessAndReportTests(unittest.TestCase):
     def test_stored_analysis_uses_persisted_summary_and_tasks(
         self, get_transcript, get_action_items
     ):
-        get_transcript.return_value = SimpleNamespace(id=7, summary="저장된 요약")
+        get_transcript.return_value = SimpleNamespace(
+            id=7, title="월말 결산 점검", summary="저장된 요약"
+        )
         get_action_items.return_value = [
             SimpleNamespace(
                 id=3,
@@ -43,12 +45,13 @@ class AccessAndReportTests(unittest.TestCase):
         transcript, analysis = stored_analysis(Mock(), Mock(), 7)
 
         self.assertEqual(transcript.id, 7)
+        self.assertEqual(analysis["title"], "월말 결산 점검")
         self.assertEqual(analysis["summary"], "저장된 요약")
         self.assertEqual(analysis["tasks"][0]["task"], "보고서 제출")
 
     @patch("app.api.routes.transcripts.transcript_repo.get_transcript")
     def test_report_requires_completed_analysis(self, get_transcript):
-        get_transcript.return_value = SimpleNamespace(id=7, summary=None)
+        get_transcript.return_value = SimpleNamespace(id=7, title=None, summary=None)
 
         with self.assertRaises(HTTPException) as context:
             stored_analysis(Mock(), Mock(), 7)

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_approved_user, get_current_admin
 from app.core.database import get_db
-from app.models.transcript import ActionItemStatus
+from app.models.transcript import ActionItemStatus, Transcript
 from app.models.user import User
 from app.repositories import transcript as transcript_repo
 from app.schemas.transcript import (
@@ -13,6 +13,7 @@ from app.schemas.transcript import (
     TranscriptCreate,
     TranscriptQuestionRequest,
     TranscriptSearchRequest,
+    TranscriptTitleUpdate,
 )
 from app.services.analyzer import analyze, summarize
 from app.services.chunking import split_text
@@ -94,6 +95,21 @@ def serialize_action_item(item) -> dict:
     }
 
 
+def serialize_transcript(transcript: Transcript) -> dict:
+    return {
+        "id": transcript.id,
+        "title": transcript.title or f"회의록 #{transcript.id}",
+        "title_is_manual": transcript.title_is_manual,
+        "department": transcript.department.value,
+        "masked_content": transcript.masked_content,
+        "summary": transcript.summary,
+        "analysis_status": "완료" if transcript.summary is not None else "분석 필요",
+        "created_at": transcript.created_at.isoformat()
+        if transcript.created_at
+        else None,
+    }
+
+
 def stored_analysis(db: Session, current_user: User, transcript_id: int):
     transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
     if transcript is None:
@@ -105,6 +121,7 @@ def stored_analysis(db: Session, current_user: User, transcript_id: int):
         )
     items = transcript_repo.get_action_items(db, current_user, transcript_id)
     return transcript, {
+        "title": transcript.title or f"회의록 #{transcript.id}",
         "summary": transcript.summary,
         "tasks": [serialize_action_item(item) for item in items],
     }
@@ -170,9 +187,7 @@ def create_transcript(
         db, current_user, masked_content, pii_items
     )
     return {
-        "id": transcript.id,
-        "department": transcript.department.value,
-        "masked_content": transcript.masked_content,
+        **serialize_transcript(transcript),
     }
 
 
@@ -181,15 +196,7 @@ def list_transcripts(
     current_user: User = Depends(get_approved_user), db: Session = Depends(get_db)
 ):
     transcripts = transcript_repo.list_transcripts(db, current_user)
-    return [
-        {
-            "id": t.id,
-            "department": t.department.value,
-            "masked_content": t.masked_content,
-            "created_at": t.created_at.isoformat() if t.created_at else None,
-        }
-        for t in transcripts
-    ]
+    return [serialize_transcript(t) for t in transcripts]
 
 
 @router.post("/search")
@@ -348,6 +355,7 @@ def analyze_transcript(
     transcript_repo.save_analysis(
         db,
         transcript,
+        result["title"],
         result["summary"],
         indexed_tasks,
         embedding,
@@ -356,6 +364,8 @@ def analyze_transcript(
     saved_items = transcript_repo.get_action_items(db, current_user, transcript.id)
     return {
         "id": transcript.id,
+        "title": transcript.title or f"회의록 #{transcript.id}",
+        "title_is_manual": transcript.title_is_manual,
         "summary": result["summary"],
         "tasks": [serialize_action_item(item) for item in saved_items],
         "indexed_chunks": len(indexed_chunks),
@@ -377,8 +387,36 @@ def get_transcript_tasks(
     items = transcript_repo.get_action_items(db, current_user, transcript_id)
     return {
         "id": transcript.id,
+        "title": transcript.title or f"회의록 #{transcript.id}",
+        "title_is_manual": transcript.title_is_manual,
+        "department": transcript.department.value,
+        "masked_content": transcript.masked_content,
+        "created_at": transcript.created_at.isoformat()
+        if transcript.created_at
+        else None,
         "summary": transcript.summary,
         "tasks": [serialize_action_item(item) for item in items],
+    }
+
+
+@router.patch("/{transcript_id}/title")
+def update_transcript_title(
+    transcript_id: int,
+    body: TranscriptTitleUpdate,
+    current_user: User = Depends(get_approved_user),
+    db: Session = Depends(get_db),
+):
+    transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
+    if transcript is None:
+        raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="회의 제목을 입력해 주세요.")
+    updated = transcript_repo.update_transcript_title(db, transcript, title)
+    return {
+        "id": updated.id,
+        "title": updated.title,
+        "title_is_manual": updated.title_is_manual,
     }
 
 
@@ -638,6 +676,11 @@ def update_transcript(
         "id": transcript.id,
         "department": transcript.department.value,
         "masked_content": transcript.masked_content,
+        "title": transcript.title or f"회의록 #{transcript.id}",
+        "title_is_manual": transcript.title_is_manual,
+        "created_at": transcript.created_at.isoformat()
+        if transcript.created_at
+        else None,
         "analysis_required": True,
     }
 
@@ -654,8 +697,4 @@ def upload_and_transcribe(
     transcript = transcript_repo.create_transcript(
         db, current_user, masked_content, pii_items
     )
-    return {
-        "id": transcript.id,
-        "department": transcript.department.value,
-        "masked_content": transcript.masked_content,
-    }
+    return serialize_transcript(transcript)
