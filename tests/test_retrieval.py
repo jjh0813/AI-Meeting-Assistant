@@ -1,6 +1,7 @@
 import unittest
 
 from app.services.retrieval import (
+    allows_semantic_only_evidence,
     answer_indicates_missing_evidence,
     has_sufficient_evidence,
     lexical_similarity,
@@ -38,6 +39,33 @@ class RetrievalTests(unittest.TestCase):
             "retrieval_score": 0.642,
         }
 
+        self.assertFalse(has_sufficient_evidence(source))
+
+    def test_common_task_question_allows_semantic_evidence(self):
+        source = {
+            "similarity": 0.70,
+            "lexical_similarity": 0.0,
+            "retrieval_score": 0.455,
+        }
+
+        self.assertTrue(allows_semantic_only_evidence("내가 맡은 업무를 알려줘"))
+        self.assertTrue(
+            has_sufficient_evidence(source, allow_semantic_only=True)
+        )
+
+    def test_unresolved_question_allows_semantic_evidence(self):
+        self.assertTrue(
+            allows_semantic_only_evidence("아직 정해지지 않은 내용은 뭐야?")
+        )
+
+    def test_unrelated_question_keeps_strict_evidence_threshold(self):
+        source = {
+            "similarity": 0.70,
+            "lexical_similarity": 0.0,
+            "retrieval_score": 0.455,
+        }
+
+        self.assertFalse(allows_semantic_only_evidence("오늘 점심은 뭐야?"))
         self.assertFalse(has_sufficient_evidence(source))
 
     def test_missing_evidence_answer_is_detected(self):

@@ -388,6 +388,34 @@ def search_similar_action_items(
     )
 
 
+def search_action_items_for_qa(
+    db: Session,
+    current_user: User,
+    query_embedding: list[float],
+    limit: int = 20,
+):
+    """Return searchable active tasks together with their source meetings."""
+    distance = ActionItem.task_embedding.cosine_distance(query_embedding).label(
+        "distance"
+    )
+    return (
+        db.query(ActionItem, Transcript, distance)
+        .join(Transcript, Transcript.id == ActionItem.transcript_id)
+        .filter(
+            ActionItem.department == current_user.department,
+            ActionItem.archived.is_(False),
+            Transcript.archived.is_(False),
+            ActionItem.status.notin_(
+                [ActionItemStatus.completed, ActionItemStatus.superseded]
+            ),
+            ActionItem.task_embedding.is_not(None),
+        )
+        .order_by(distance)
+        .limit(limit)
+        .all()
+    )
+
+
 def get_action_item_similarity(
     db: Session,
     current_user: User,

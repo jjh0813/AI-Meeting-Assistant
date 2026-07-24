@@ -60,6 +60,23 @@ _ALIASES = {
     "킥오프": "착수",
     "착수": "착수",
 }
+_SEMANTIC_INTENT_TERMS = (
+    "업무",
+    "할 일",
+    "할일",
+    "맡은",
+    "담당",
+    "책임자",
+    "일정",
+    "기한",
+    "마감",
+    "미결",
+    "미정",
+    "보류",
+    "정해지지",
+    "확정되지",
+    "추가 논의",
+)
 
 
 def _strip_particle(token: str) -> str:
@@ -131,12 +148,21 @@ def rerank_sources(query: str, sources: list[dict], limit: int) -> list[dict]:
     )[:limit]
 
 
-def has_sufficient_evidence(source: dict) -> bool:
+def allows_semantic_only_evidence(question: str) -> bool:
+    """Allow semantic retrieval for common meeting intents with generic wording."""
+    normalized = re.sub(r"\s+", " ", question.lower()).strip()
+    return any(term in normalized for term in _SEMANTIC_INTENT_TERMS)
+
+
+def has_sufficient_evidence(
+    source: dict, allow_semantic_only: bool = False
+) -> bool:
     return (
         source["similarity"] >= 0.60
         and (
             source["lexical_similarity"] >= 0.30
             or source["retrieval_score"] >= 0.78
+            or (allow_semantic_only and source["similarity"] >= 0.65)
         )
     )
 

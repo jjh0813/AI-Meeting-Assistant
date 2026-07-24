@@ -32,6 +32,7 @@ from app.services.qa import answer_from_meetings
 from app.services.question_guard import guard_meeting_question
 from app.services.report import build_pdf_report, build_text_report
 from app.services.retrieval import (
+    allows_semantic_only_evidence,
     answer_indicates_missing_evidence,
     has_sufficient_evidence,
     rerank_sources,
@@ -43,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 MIN_TASK_DUPLICATE_SIMILARITY = 0.75
 MEETING_ONLY_MESSAGE = "Noting은 내 부서 회의록과 업무 관련 질문만 답할 수 있습니다."
+NO_EVIDENCE_MESSAGE = "질문과 관련된 내용을 회의록에서 확인할 수 없습니다."
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 ALLOWED_AUDIO_EXTENSIONS = {
     ".aac",
@@ -187,7 +189,35 @@ def find_rag_sources(
         for transcript, distance in summary_matches
         if transcript.id not in chunk_transcript_ids
     ]
-    return rerank_sources(query, chunk_sources + summary_sources, limit)
+    task_matches = transcript_repo.search_action_items_for_qa(
+        db, current_user, query_embedding, candidate_limit
+    )
+    task_sources = [
+        {
+            "id": transcript.id,
+            "chunk_id": None,
+            "chunk_index": None,
+            "content": "\n".join(
+                (
+                    f"업무: {item.task or '업무명 없음'}",
+                    f"담당자: {item.assignee or '담당 미지정'}",
+                    f"기한: {item.due or '기한 미정'}",
+                    f"요청사항: {item.request or '요청사항 없음'}",
+                    f"상태: {item.status.value}",
+                )
+            ),
+            "summary": transcript.summary,
+            "source_type": "action_item",
+            "similarity": round(1 - float(distance), 4),
+            "created_at": transcript.created_at.isoformat()
+            if transcript.created_at
+            else None,
+        }
+        for item, transcript, distance in task_matches
+    ]
+    return rerank_sources(
+        query, chunk_sources + summary_sources + task_sources, limit
+    )
 
 
 def run_analysis_pipeline(db: Session, current_user: User, transcript: Transcript):
@@ -384,16 +414,19 @@ def ask_about_meetings(
             detail="검색용 임베딩을 생성하지 못했습니다. Ollama 임베딩 모델 상태를 확인해 주세요.",
         )
 
+    allow_semantic_only = allows_semantic_only_evidence(question)
     sources = [
         source
         for source in find_rag_sources(
             db, current_user, question, query_embedding, limit=3
         )
-        if has_sufficient_evidence(source)
+        if has_sufficient_evidence(
+            source, allow_semantic_only=allow_semantic_only
+        )
     ]
     if not sources:
         return {
-            "answer": MEETING_ONLY_MESSAGE,
+            "answer": NO_EVIDENCE_MESSAGE,
             "sources": [],
             "grounded": False,
             "blocked": True,
