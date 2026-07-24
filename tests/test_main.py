@@ -57,6 +57,48 @@ class MainRouteTests(unittest.TestCase):
         self.assertIn("POST", route.methods)
         self.assertEqual(route.status_code, 202)
 
+    def test_archive_routes_use_expected_methods(self):
+        methods_by_path = {}
+        for route in transcript_router.routes:
+            path = getattr(route, "path", None)
+            if path in {
+                "/transcripts/archive",
+                "/transcripts/{transcript_id}/archive",
+                "/transcripts/{transcript_id}/restore",
+                "/transcripts/{transcript_id}",
+                "/transcripts/tasks/archive",
+                "/transcripts/{transcript_id}/tasks/{task_id}/archive",
+                "/transcripts/{transcript_id}/tasks/{task_id}/restore",
+                "/transcripts/{transcript_id}/tasks/{task_id}",
+            }:
+                methods_by_path.setdefault(path, set()).update(route.methods)
+
+        self.assertIn("GET", methods_by_path["/transcripts/archive"])
+        self.assertIn(
+            "POST", methods_by_path["/transcripts/{transcript_id}/archive"]
+        )
+        self.assertIn(
+            "POST", methods_by_path["/transcripts/{transcript_id}/restore"]
+        )
+        self.assertIn("DELETE", methods_by_path["/transcripts/{transcript_id}"])
+        self.assertIn("GET", methods_by_path["/transcripts/tasks/archive"])
+        self.assertIn(
+            "POST",
+            methods_by_path[
+                "/transcripts/{transcript_id}/tasks/{task_id}/archive"
+            ],
+        )
+        self.assertIn(
+            "POST",
+            methods_by_path[
+                "/transcripts/{transcript_id}/tasks/{task_id}/restore"
+            ],
+        )
+        self.assertIn(
+            "DELETE",
+            methods_by_path["/transcripts/{transcript_id}/tasks/{task_id}"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

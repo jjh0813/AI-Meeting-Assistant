@@ -29,6 +29,8 @@ class Transcript(Base):
         Text, nullable=False, default="pending", server_default="pending"
     )
     analysis_error = Column(Text, nullable=True)
+    archived = Column(Boolean, nullable=False, default=False, server_default="false")
+    archived_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -62,6 +64,8 @@ class ActionItem(Base):
         ForeignKey("action_items.id", ondelete="SET NULL"),
         nullable=True,
     )
+    archived = Column(Boolean, nullable=False, default=False, server_default="false")
+    archived_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

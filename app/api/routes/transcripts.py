@@ -293,6 +293,43 @@ def list_transcripts(
     return [serialize_transcript(t) for t in transcripts]
 
 
+@router.get("/archive")
+def list_archived_transcripts(
+    current_user: User = Depends(get_approved_user), db: Session = Depends(get_db)
+):
+    transcripts = transcript_repo.list_archived_transcripts(db, current_user)
+    return [
+        {
+            **serialize_transcript(transcript),
+            "archived_at": transcript.archived_at.isoformat()
+            if transcript.archived_at
+            else None,
+            "task_count": len(
+                transcript_repo.get_action_items(db, current_user, transcript.id)
+            ),
+        }
+        for transcript in transcripts
+    ]
+
+
+@router.get("/tasks/archive")
+def list_archived_tasks(
+    current_user: User = Depends(get_approved_user), db: Session = Depends(get_db)
+):
+    rows = transcript_repo.list_archived_action_items(db, current_user)
+    return [
+        {
+            **serialize_action_item(item),
+            "transcript_id": transcript.id,
+            "transcript_title": transcript.title or f"회의록 #{transcript.id}",
+            "archived_at": item.archived_at.isoformat()
+            if item.archived_at
+            else None,
+        }
+        for item, transcript in rows
+    ]
+
+
 @router.post("/search")
 def search_transcripts(
     body: TranscriptSearchRequest,
@@ -485,6 +522,54 @@ def update_transcript_title(
     }
 
 
+@router.post("/{transcript_id}/archive")
+def archive_transcript(
+    transcript_id: int,
+    current_user: User = Depends(get_approved_user),
+    db: Session = Depends(get_db),
+):
+    transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
+    if transcript is None:
+        raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
+    archived = transcript_repo.archive_transcript(db, transcript)
+    return {
+        "id": archived.id,
+        "archived": archived.archived,
+        "archived_at": archived.archived_at.isoformat()
+        if archived.archived_at
+        else None,
+    }
+
+
+@router.post("/{transcript_id}/restore")
+def restore_transcript(
+    transcript_id: int,
+    current_user: User = Depends(get_approved_user),
+    db: Session = Depends(get_db),
+):
+    transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
+    if transcript is None:
+        raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
+    restored = transcript_repo.restore_transcript(db, transcript)
+    return {"id": restored.id, "archived": restored.archived}
+
+
+@router.delete("/{transcript_id}", status_code=204)
+def delete_transcript(
+    transcript_id: int,
+    current_user: User = Depends(get_approved_user),
+    db: Session = Depends(get_db),
+):
+    transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
+    if transcript is None:
+        raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
+    try:
+        transcript_repo.delete_archived_transcript(db, transcript)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Response(status_code=204)
+
+
 @router.patch("/{transcript_id}/tasks/{task_id}")
 def update_task_status(
     transcript_id: int,
@@ -506,6 +591,57 @@ def update_task_status(
         "transcript_id": updated.transcript_id,
         "status": updated.status.value,
     }
+
+
+@router.post("/{transcript_id}/tasks/{task_id}/archive")
+def archive_task(
+    transcript_id: int,
+    task_id: int,
+    current_user: User = Depends(get_approved_user),
+    db: Session = Depends(get_db),
+):
+    item = transcript_repo.get_action_item(
+        db, current_user, transcript_id, task_id
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
+    archived = transcript_repo.archive_action_item(db, item)
+    return {"id": archived.id, "archived": archived.archived}
+
+
+@router.post("/{transcript_id}/tasks/{task_id}/restore")
+def restore_task(
+    transcript_id: int,
+    task_id: int,
+    current_user: User = Depends(get_approved_user),
+    db: Session = Depends(get_db),
+):
+    item = transcript_repo.get_action_item(
+        db, current_user, transcript_id, task_id
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
+    restored = transcript_repo.restore_action_item(db, item)
+    return {"id": restored.id, "archived": restored.archived}
+
+
+@router.delete("/{transcript_id}/tasks/{task_id}", status_code=204)
+def delete_task(
+    transcript_id: int,
+    task_id: int,
+    current_user: User = Depends(get_approved_user),
+    db: Session = Depends(get_db),
+):
+    item = transcript_repo.get_action_item(
+        db, current_user, transcript_id, task_id
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
+    try:
+        transcript_repo.delete_archived_action_item(db, item)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Response(status_code=204)
 
 
 @router.get("/{transcript_id}/task-duplicates")

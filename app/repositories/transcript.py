@@ -1,3 +1,4 @@
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.transcript import (
@@ -35,7 +36,25 @@ def create_transcript(
 def list_transcripts(db: Session, current_user: User) -> list[Transcript]:
     return (
         db.query(Transcript)
-        .filter(Transcript.department == current_user.department)
+        .filter(
+            Transcript.department == current_user.department,
+            Transcript.archived.is_(False),
+        )
+        .order_by(Transcript.created_at.desc(), Transcript.id.desc())
+        .all()
+    )
+
+
+def list_archived_transcripts(
+    db: Session, current_user: User
+) -> list[Transcript]:
+    return (
+        db.query(Transcript)
+        .filter(
+            Transcript.department == current_user.department,
+            Transcript.archived.is_(True),
+        )
+        .order_by(Transcript.archived_at.desc(), Transcript.id.desc())
         .all()
     )
 
@@ -204,6 +223,44 @@ def update_transcript_title(
     return transcript
 
 
+def archive_transcript(db: Session, transcript: Transcript) -> Transcript:
+    transcript.archived = True
+    transcript.archived_at = func.now()
+    db.commit()
+    db.refresh(transcript)
+    return transcript
+
+
+def restore_transcript(db: Session, transcript: Transcript) -> Transcript:
+    transcript.archived = False
+    transcript.archived_at = None
+    db.commit()
+    db.refresh(transcript)
+    return transcript
+
+
+def delete_archived_transcript(db: Session, transcript: Transcript) -> None:
+    if not transcript.archived:
+        raise ValueError("보관된 회의만 영구 삭제할 수 있습니다.")
+    action_item_ids = [
+        row[0]
+        for row in db.query(ActionItem.id)
+        .filter(ActionItem.transcript_id == transcript.id)
+        .all()
+    ]
+    if action_item_ids:
+        db.query(ActionItem).filter(
+            ActionItem.superseded_by_id.in_(action_item_ids)
+        ).update({ActionItem.superseded_by_id: None}, synchronize_session=False)
+    db.query(PiiEntry).filter(PiiEntry.transcript_id == transcript.id).delete()
+    db.query(TranscriptChunk).filter(
+        TranscriptChunk.transcript_id == transcript.id
+    ).delete()
+    db.query(ActionItem).filter(ActionItem.transcript_id == transcript.id).delete()
+    db.delete(transcript)
+    db.commit()
+
+
 def get_action_items(
     db: Session, current_user: User, transcript_id: int
 ) -> list[ActionItem]:
@@ -212,7 +269,21 @@ def get_action_items(
         .filter(
             ActionItem.transcript_id == transcript_id,
             ActionItem.department == current_user.department,
+            ActionItem.archived.is_(False),
         )
+        .all()
+    )
+
+
+def list_archived_action_items(db: Session, current_user: User):
+    return (
+        db.query(ActionItem, Transcript)
+        .join(Transcript, Transcript.id == ActionItem.transcript_id)
+        .filter(
+            ActionItem.department == current_user.department,
+            ActionItem.archived.is_(True),
+        )
+        .order_by(ActionItem.archived_at.desc(), ActionItem.id.desc())
         .all()
     )
 
@@ -262,6 +333,32 @@ def update_action_item_status(
     return action_item
 
 
+def archive_action_item(db: Session, action_item: ActionItem) -> ActionItem:
+    action_item.archived = True
+    action_item.archived_at = func.now()
+    db.commit()
+    db.refresh(action_item)
+    return action_item
+
+
+def restore_action_item(db: Session, action_item: ActionItem) -> ActionItem:
+    action_item.archived = False
+    action_item.archived_at = None
+    db.commit()
+    db.refresh(action_item)
+    return action_item
+
+
+def delete_archived_action_item(db: Session, action_item: ActionItem) -> None:
+    if not action_item.archived:
+        raise ValueError("보관된 할 일만 영구 삭제할 수 있습니다.")
+    db.query(ActionItem).filter(
+        ActionItem.superseded_by_id == action_item.id
+    ).update({ActionItem.superseded_by_id: None}, synchronize_session=False)
+    db.delete(action_item)
+    db.commit()
+
+
 def search_similar_action_items(
     db: Session,
     current_user: User,
@@ -274,8 +371,11 @@ def search_similar_action_items(
     )
     return (
         db.query(ActionItem, distance)
+        .join(Transcript, Transcript.id == ActionItem.transcript_id)
         .filter(
             ActionItem.department == current_user.department,
+            ActionItem.archived.is_(False),
+            Transcript.archived.is_(False),
             ActionItem.transcript_id != exclude_transcript_id,
             ActionItem.status.notin_(
                 [ActionItemStatus.completed, ActionItemStatus.superseded]
@@ -332,6 +432,7 @@ def search_similar_summaries(
         db.query(Transcript, distance)
         .filter(
             Transcript.department == current_user.department,
+            Transcript.archived.is_(False),
             Transcript.summary.is_not(None),
             Transcript.summary_embedding.is_not(None),
         )
@@ -354,6 +455,7 @@ def search_similar_chunks(
         .filter(
             TranscriptChunk.department == current_user.department,
             Transcript.department == current_user.department,
+            Transcript.archived.is_(False),
             TranscriptChunk.embedding.is_not(None),
         )
         .order_by(distance)

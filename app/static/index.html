@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#f6f3ed" />
-  <meta name="description" content="Noting은 회의 대화를 결정과 실행 항목으로 정리하는 AI 회의 작업대입니다." />
-  <title>Noting — AI 회의 작업대</title>
+  <meta name="description" content="Noting은 회의 대화를 요약하고 결정과 실행 항목을 정리하는 AI 회의 요약 서비스입니다." />
+  <title>AI 회의 요약</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="/ui/styles.css" />
@@ -20,8 +20,8 @@
         <span>Noting</span>
       </div>
       <div class="auth-copy">
-        <p class="label-caps light-label">MEETING SIGNAL DESK</p>
-        <h1>대화 속 신호를<br />다음 행동으로.</h1>
+        <p class="label-caps light-label">AI MEETING SUMMARY</p>
+        <h1>회의의 핵심을<br />다음 행동으로.</h1>
         <p>회의록을 안전하게 보관하고, AI가 결정과 업무를 찾아 팀의 기억으로 연결합니다.</p>
       </div>
       <div class="auth-signal" aria-hidden="true">
@@ -78,13 +78,13 @@
       <button class="button primary new-meeting" type="button" onclick="openComposer()"><span>＋</span> 새 회의 가져오기</button>
       <nav class="main-nav" aria-label="주요 메뉴">
         <p class="label-caps">WORKSPACE</p>
-        <button id="nav-dashboard" class="nav-item active" type="button" onclick="showDashboard()"><span>⌂</span> 회의 작업대</button>
-        <button type="button" class="nav-item" onclick="showDashboard('date-panel')"><span>▦</span> 모든 회의</button>
-        <button type="button" class="nav-item" onclick="showDashboard('task-panel')"><span>✓</span> 실행 항목 <b id="task-count" class="nav-count">0</b></button>
-        <button type="button" class="nav-item" onclick="showDashboard('qa-dashboard')"><span>✦</span> 회의록 AI</button>
+        <button id="nav-workspace" class="nav-item active" type="button" onclick="showPage('workspace')"><span>▦</span> 워크스페이스</button>
+        <button id="nav-meetings" class="nav-item" type="button" onclick="showPage('meetings')"><span>▤</span> 모든 회의</button>
+        <button id="nav-tasks" class="nav-item" type="button" onclick="showPage('tasks')"><span>☷</span> 할 일 <b id="task-count" class="nav-count">0</b></button>
+        <button id="nav-archive" class="nav-item" type="button" onclick="showPage('archive')"><span>▱</span> 아카이브</button>
       </nav>
       <section class="recent-nav">
-        <div class="nav-section-title"><p class="label-caps">RECENT SIGNALS</p><button type="button" aria-label="새로고침" onclick="refreshDashboard()">↻</button></div>
+        <div class="nav-section-title"><p class="label-caps">RECENT MEETINGS</p><button type="button" aria-label="새로고침" onclick="refreshDashboard()">↻</button></div>
         <div id="sidebar-meetings" class="sidebar-meetings"></div>
       </section>
       <div id="admin-nav" class="admin-nav hidden">
@@ -94,7 +94,7 @@
       <footer class="profile">
         <span id="avatar" class="avatar">N</span>
         <span class="profile-copy"><b id="profile-name"></b><small id="profile-meta"></small></span>
-        <button class="icon-button" type="button" title="로그아웃" aria-label="로그아웃" onclick="logout()">↗</button>
+        <button class="logout-button" type="button" aria-label="로그아웃" onclick="logout()"><span aria-hidden="true">⇥</span> 로그아웃</button>
       </footer>
     </aside>
 
@@ -102,8 +102,8 @@
       <header class="topbar">
         <button class="icon-button mobile-only" type="button" aria-label="메뉴 열기" onclick="toggleSidebar(true)">☰</button>
         <div>
-          <p class="label-caps">MEETING INTELLIGENCE</p>
-          <span id="workspace-caption">내 부서의 신호 작업대</span>
+          <p id="page-header-label" class="label-caps">WORKSPACE</p>
+          <span id="workspace-caption">내 부서의 AI 회의 요약</span>
         </div>
         <div class="top-actions">
           <span id="approval-badge" class="status-pill">승인됨</span>
@@ -123,9 +123,9 @@
         <section id="dashboard-view">
           <div class="dashboard-intro">
             <div>
-              <p class="eyebrow"><span></span> LIVE WORKSPACE</p>
-              <h1><span id="greeting-name"></span>님의<br /><em>회의 신호</em>를 정리했어요.</h1>
-              <p>날짜를 고르면 회의와 실행 항목이 함께 연결됩니다.</p>
+              <p class="eyebrow"><span></span> AI MEETING SUMMARY</p>
+              <h1><span id="greeting-name"></span>님의<br />회의를 정리했어요.</h1>
+              <p>날짜를 고르면 해당 날짜의 회의와 요약을 확인할 수 있습니다.</p>
             </div>
             <div class="signal-meter" aria-label="회의 분석 현황">
               <div><span id="meeting-total">0</span><small>전체 회의</small></div>
@@ -139,7 +139,7 @@
           <div class="dashboard-grid">
             <section id="calendar-panel" class="paper-panel calendar-panel">
               <div class="panel-head">
-                <div><p class="label-caps">DATE SIGNAL</p><h2>회의 캘린더</h2></div>
+                <div><p class="label-caps">MEETING CALENDAR</p><h2>회의 캘린더</h2></div>
                 <div class="calendar-controls"><button type="button" onclick="changeMonth(-1)">←</button><strong id="calendar-month"></strong><button type="button" onclick="changeMonth(1)">→</button></div>
               </div>
               <div class="calendar-week"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
@@ -149,7 +149,7 @@
 
             <section id="task-panel" class="action-rail">
               <div class="panel-head">
-                <div><p class="label-caps teal-text">NEXT SCENE</p><h2>다가오는 실행 항목</h2></div>
+                <div><p class="label-caps teal-text">UPCOMING</p><h2>다가오는 이벤트</h2></div>
                 <span id="task-progress" class="progress-pill">0개</span>
               </div>
               <div id="event-list" class="event-list"></div>
@@ -180,11 +180,50 @@
           </div>
         </section>
 
+        <section id="all-meetings-view" class="page-view hidden">
+          <div class="page-intro">
+            <div><p class="eyebrow"><span></span> ALL MEETINGS</p><h1>모든 회의</h1><p>내 부서에서 저장한 회의를 검색하고 분석 상태별로 확인하세요.</p></div>
+            <div class="page-count"><strong id="all-meeting-count">0</strong><span>개의 회의</span></div>
+          </div>
+          <div class="filter-bar paper-panel">
+            <label class="search-field"><span>⌕</span><input id="meeting-search" placeholder="회의 제목이나 요약 검색" oninput="renderAllMeetings()" /></label>
+            <select id="meeting-status-filter" aria-label="분석 상태 필터" onchange="renderAllMeetings()"><option value="all">모든 상태</option><option value="completed">분석 완료</option><option value="processing">분석 중</option><option value="pending">분석 대기</option><option value="failed">분석 실패</option></select>
+            <select id="meeting-sort" aria-label="회의 정렬" onchange="renderAllMeetings()"><option value="recent">최신순</option><option value="oldest">오래된순</option><option value="title">제목순</option></select>
+          </div>
+          <div id="all-meetings-list" class="meeting-card-grid"></div>
+        </section>
+
+        <section id="tasks-view" class="page-view hidden">
+          <div class="page-intro">
+            <div><p class="eyebrow"><span></span> TASKS</p><h1>할 일</h1><p>회의에서 추출된 업무를 담당자와 진행 상태별로 관리하세요.</p></div>
+            <div class="task-progress-card"><div id="task-progress-ring" class="progress-ring"><strong id="task-progress-percent">0%</strong></div><div><b id="task-progress-copy">0 / 0 완료</b><span>전체 진행률</span></div></div>
+          </div>
+          <div class="filter-bar paper-panel">
+            <label class="search-field"><span>⌕</span><input id="task-search" placeholder="할 일 검색" oninput="renderTasksPage()" /></label>
+            <select id="task-owner-filter" aria-label="담당자 필터" onchange="renderTasksPage()"><option value="all">모든 담당자</option></select>
+            <select id="task-status-filter" aria-label="업무 상태 필터" onchange="renderTasksPage()"><option value="all">모든 상태</option><option value="대기">대기</option><option value="진행중">진행중</option><option value="완료">완료</option></select>
+          </div>
+          <div id="tasks-page-list" class="task-page-list paper-panel"></div>
+        </section>
+
+        <section id="archive-view" class="page-view hidden">
+          <div class="page-intro">
+            <div><p class="eyebrow"><span></span> ARCHIVE</p><h1>아카이브</h1><p>더 이상 활성 목록에 표시하지 않는 회의와 할 일을 보관하고 필요할 때 복구하세요.</p></div>
+            <div class="page-count"><strong id="archive-count">0</strong><span>개의 보관 항목</span></div>
+          </div>
+          <div class="filter-bar paper-panel">
+            <label class="search-field"><span>⌕</span><input id="archive-search" placeholder="보관된 회의 검색" oninput="renderArchive()" /></label>
+            <select id="archive-type-filter" aria-label="아카이브 종류 필터" onchange="renderArchive()"><option value="all">모든 항목</option><option value="meeting">회의만</option><option value="task">할 일만</option></select>
+            <button class="button ghost compact" type="button" onclick="loadArchive()">↻ 새로고침</button>
+          </div>
+          <div id="archive-list" class="archive-list"></div>
+        </section>
+
         <section id="meeting-detail" class="detail-view hidden">
           <div class="detail-toolbar">
-            <button class="back-button" type="button" onclick="showDashboard()">← 회의 작업대로</button>
+            <button class="back-button" type="button" onclick="returnFromDetail()">← 이전 화면으로</button>
             <div><span id="detail-analysis-state" class="status-pill processing">분석 확인 중</span><button class="icon-button" type="button" aria-label="회의 메뉴" onclick="toggleDetailMenu()">⋮</button></div>
-            <div id="detail-menu" class="popover hidden"><button type="button" onclick="showTitleEditor()">제목 수정</button><button type="button" onclick="downloadPdf(currentTranscriptId)">PDF 보고서</button><button id="pii-button" class="hidden" type="button" onclick="viewPii(currentTranscriptId)">개인정보 원본</button></div>
+            <div id="detail-menu" class="popover hidden"><button type="button" onclick="showTitleEditor()">제목 수정</button><button type="button" onclick="downloadPdf(currentTranscriptId)">PDF 보고서</button><button type="button" onclick="archiveCurrentTranscript()">아카이브로 이동</button><button id="pii-button" class="hidden" type="button" onclick="viewPii(currentTranscriptId)">개인정보 원본</button></div>
           </div>
 
           <header class="detail-header">
@@ -208,7 +247,7 @@
             <aside class="detail-side">
               <section class="summary-panel paper-panel">
                 <div class="panel-head">
-                  <div><p class="label-caps teal-text">AI SIGNAL</p><h2>핵심 요약</h2></div>
+                  <div><p class="label-caps teal-text">AI SUMMARY</p><h2>핵심 요약</h2></div>
                   <span class="summary-spark">✦</span>
                 </div>
                 <div id="detail-summary" class="detail-summary"><span class="muted">분석 결과를 확인하고 있습니다.</span></div>
@@ -242,7 +281,7 @@
   <div id="composer-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="composer-title">
     <div class="modal-backdrop" onclick="closeComposer()"></div>
     <section class="modal-card paper-panel">
-      <div class="modal-head"><div><p class="label-caps">NEW MEETING SIGNAL</p><h2 id="composer-title">새 회의 가져오기</h2></div><button class="icon-button" type="button" aria-label="닫기" onclick="closeComposer()">×</button></div>
+      <div class="modal-head"><div><p class="label-caps">NEW MEETING</p><h2 id="composer-title">새 회의 가져오기</h2></div><button class="icon-button" type="button" aria-label="닫기" onclick="closeComposer()">×</button></div>
       <div class="composer-tabs"><button id="text-mode" class="active" type="button" onclick="setComposerMode('text')">텍스트 입력</button><button id="audio-mode" type="button" onclick="setComposerMode('audio')">음성 변환</button></div>
       <div id="text-composer"><label for="new-content">회의 내용</label><textarea id="new-content" placeholder="회의 내용을 붙여넣어 주세요. 저장 즉시 마스킹되고 자동 분석이 시작됩니다."></textarea><button id="text-save-button" class="button primary wide" type="button" onclick="saveText()">저장하고 자동 분석 시작</button></div>
       <div id="audio-composer" class="hidden">

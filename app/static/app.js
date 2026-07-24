@@ -2,9 +2,13 @@ let token = sessionStorage.getItem("noting_token");
 let me = null;
 let transcripts = [];
 let dashboardTasks = [];
+let archivedTranscripts = [];
+let archivedTasks = [];
 let calendarCursor = new Date();
 let selectedCalendarDate = new Date();
 let currentTranscriptId = null;
+let currentPage = "workspace";
+let detailReturnPage = "workspace";
 let analysisPollId = null;
 let recorder = {
   stream: null,
@@ -46,7 +50,7 @@ function showAuth(tab) {
   $("auth-title").textContent = loginMode ? "다시 만나서 반가워요." : "팀 작업대를 요청하세요.";
   $("auth-subtitle").textContent = loginMode
     ? "내 부서의 회의 작업대로 로그인하세요."
-    : "관리자 승인 후 같은 부서의 회의 신호를 볼 수 있습니다.";
+    : "관리자 승인 후 같은 부서의 회의 요약을 볼 수 있습니다.";
 }
 
 function toggleSidebar(open) {
@@ -123,7 +127,7 @@ async function loadMe() {
   $("profile-name").textContent = me.username;
   $("profile-meta").textContent = `${me.department} · ${me.role}`;
   $("greeting-name").textContent = me.username;
-  $("workspace-caption").textContent = `${me.department} 부서의 신호 작업대`;
+  $("workspace-caption").textContent = `${me.department} 부서 · AI 회의 요약`;
   $("avatar").textContent = me.username.slice(0, 1).toUpperCase();
   const approved = me.status === "승인";
   $("pending-view").classList.toggle("hidden", approved);
@@ -142,6 +146,8 @@ function logout() {
   me = null;
   transcripts = [];
   dashboardTasks = [];
+  archivedTranscripts = [];
+  archivedTasks = [];
   if (analysisPollId) clearTimeout(analysisPollId);
   $("app-view").classList.add("hidden");
   $("auth-view").classList.remove("hidden");
@@ -206,6 +212,9 @@ async function refreshDashboard() {
     renderCalendar();
     renderEvents();
     renderDateMeetings();
+    renderAllMeetings();
+    populateTaskOwners();
+    renderTasksPage();
   } catch (error) {
     showToast(`목록을 불러오지 못했습니다: ${error.message}`, "error");
   }
@@ -217,7 +226,6 @@ function renderDashboardStats() {
   $("analysis-total").textContent = transcripts.filter(item => item.analysis_status === "completed" || item.summary).length;
   $("active-task-total").textContent = activeTasks.length;
   $("task-count").textContent = activeTasks.length;
-  $("task-progress").textContent = `${activeTasks.length}개`;
 }
 
 function renderSidebarMeetings() {
@@ -278,8 +286,12 @@ function renderCalendar() {
 }
 
 function renderEvents() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
   const active = dashboardTasks.filter(isActiveTask);
-  const dated = active.map(task => ({ ...task, parsedDue: parseDue(task.due) }));
+  const dated = active
+    .map(task => ({ ...task, parsedDue: parseDue(task.due) }))
+    .filter(task => !task.parsedDue || task.parsedDue >= today);
   dated.sort((a, b) => {
     if (a.parsedDue && b.parsedDue) return a.parsedDue - b.parsedDue;
     if (a.parsedDue) return -1;
@@ -287,17 +299,22 @@ function renderEvents() {
     return b.id - a.id;
   });
   const items = dated.slice(0, 6);
+  $("task-progress").textContent = `${items.length}개`;
   if (!items.length) {
-    $("event-list").innerHTML = '<div class="empty-state">분석된 실행 항목이 없습니다.<br />새 회의를 추가하면 담당 업무와 기한이 연결됩니다.</div>';
+    $("event-list").innerHTML = '<div class="empty-state">다가오는 이벤트가 없습니다.<br />회의에서 추출된 업무 시작과 마감 일정이 이곳에 표시됩니다.</div>';
     return;
   }
-  $("event-list").innerHTML = items.map(task => `
+  $("event-list").innerHTML = items.map(task => {
+    const eventType = task.parsedDue ? "마감 일정" : "시작 업무";
+    const icon = task.parsedDue ? "◷" : "→";
+    return `
     <div class="event-item">
-      <button class="event-check" type="button" aria-label="완료 처리" onclick="updateTaskStatus(${task.transcriptId},${task.id},'완료',false)">✓</button>
+      <span class="event-type-icon ${task.parsedDue ? "deadline" : "start"}" aria-hidden="true">${icon}</span>
       <div class="event-copy"><button type="button" onclick="openTranscript(${task.transcriptId})">${escapeHtml(task.task || "업무 항목")}</button><small>${escapeHtml(task.assignee || "담당 미지정")} · ${escapeHtml(task.transcriptTitle || `회의록 #${task.transcriptId}`)}</small></div>
-      <span class="event-due">${escapeHtml(task.due || "기한 미정")}</span>
+      <span class="event-due">${escapeHtml(task.parsedDue ? `마감 · ${task.due}` : eventType)}</span>
     </div>
-  `).join("");
+  `;
+  }).join("");
 }
 
 function renderDateMeetings() {
@@ -322,20 +339,262 @@ function renderDateMeetings() {
   }).join("");
 }
 
-function showDashboard(targetId = null) {
+function showPage(page, targetId = null) {
+  currentPage = page;
   currentTranscriptId = null;
   $("meeting-detail").classList.add("hidden");
-  $("dashboard-view").classList.remove("hidden");
+  const views = {
+    workspace: "dashboard-view",
+    meetings: "all-meetings-view",
+    tasks: "tasks-view",
+    archive: "archive-view",
+  };
+  Object.values(views).forEach(id => $(id).classList.add("hidden"));
+  $(views[page] || views.workspace).classList.remove("hidden");
+  ["workspace", "meetings", "tasks", "archive"].forEach(name => {
+    $(`nav-${name}`).classList.toggle("active", name === page);
+  });
+  const headers = {
+    workspace: ["WORKSPACE", `${me?.department || ""} 부서 · AI 회의 요약`],
+    meetings: ["ALL MEETINGS", "내 부서의 전체 회의"],
+    tasks: ["TASKS", "회의에서 추출된 할 일"],
+    archive: ["ARCHIVE", "보관된 회의 관리"],
+  };
+  const [label, caption] = headers[page] || headers.workspace;
+  $("page-header-label").textContent = label;
+  $("workspace-caption").textContent = caption;
   $("detail-menu").classList.add("hidden");
   hideTitleEditor();
   toggleSidebar(false);
+  if (page === "archive") loadArchive();
+  if (page === "meetings") renderAllMeetings();
+  if (page === "tasks") renderTasksPage();
   if (targetId) setTimeout(() => $(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" }), 40);
   else window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+function showDashboard(targetId = null) {
+  showPage("workspace", targetId);
+}
+
+function returnFromDetail() {
+  showPage(detailReturnPage || "workspace");
+}
+
 function focusAssistant() {
-  showDashboard("qa-dashboard");
+  showPage("workspace", "qa-dashboard");
   setTimeout(() => $("qa-dashboard-input").focus(), 450);
+}
+
+function renderAllMeetings() {
+  const box = $("all-meetings-list");
+  if (!box) return;
+  const query = $("meeting-search").value.trim().toLowerCase();
+  const status = $("meeting-status-filter").value;
+  const sort = $("meeting-sort").value;
+  const filtered = transcripts.filter(item => {
+    const itemStatus = item.analysis_status || (item.summary ? "completed" : "pending");
+    const text = `${item.title || ""} ${item.summary || ""} ${item.masked_content || ""}`.toLowerCase();
+    return (!query || text.includes(query)) && (status === "all" || itemStatus === status);
+  });
+  filtered.sort((a, b) => {
+    if (sort === "oldest") return new Date(a.created_at || 0) - new Date(b.created_at || 0);
+    if (sort === "title") return String(a.title || "").localeCompare(String(b.title || ""), "ko");
+    return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+  });
+  $("all-meeting-count").textContent = filtered.length;
+  if (!filtered.length) {
+    box.innerHTML = '<div class="empty-state paper-panel">조건에 맞는 회의가 없습니다.</div>';
+    return;
+  }
+  box.innerHTML = filtered.map(item => {
+    const itemStatus = item.analysis_status || (item.summary ? "completed" : "pending");
+    return `
+      <article class="meeting-card paper-panel">
+        <div class="meeting-card-top"><span class="meeting-group"><i></i>${escapeHtml(item.department)}</span><span class="analysis-tag ${itemStatus}">${escapeHtml(analysisLabel(itemStatus))}</span></div>
+        <button class="meeting-card-open" type="button" onclick="openTranscript(${item.id})"><h2>${escapeHtml(item.title || `회의록 #${item.id}`)}</h2><p>${escapeHtml(item.summary || item.masked_content || "회의 내용을 확인하세요.")}</p></button>
+        <div class="meeting-card-foot"><span>${escapeHtml(formatDate(item.created_at, true))}</span><div><button type="button" onclick="archiveTranscript(${item.id})">보관</button><button type="button" onclick="openTranscript(${item.id})">회의 열기 →</button></div></div>
+      </article>
+    `;
+  }).join("");
+}
+
+function populateTaskOwners() {
+  const select = $("task-owner-filter");
+  if (!select) return;
+  const selected = select.value;
+  const owners = [...new Set(dashboardTasks.map(task => task.assignee).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko"));
+  select.innerHTML = '<option value="all">모든 담당자</option>' + owners.map(owner => `<option value="${escapeHtml(owner)}">${escapeHtml(owner)}</option>`).join("");
+  select.value = owners.includes(selected) ? selected : "all";
+}
+
+function taskPriority(task) {
+  const due = parseDue(task.due);
+  if (!due) return { key: "low", label: "낮음" };
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Math.ceil((due - today) / 86400000);
+  if (days <= 3) return { key: "high", label: days < 0 ? "지연" : "긴급" };
+  if (days <= 7) return { key: "medium", label: "중요" };
+  return { key: "low", label: "낮음" };
+}
+
+function renderTasksPage() {
+  const box = $("tasks-page-list");
+  if (!box) return;
+  const query = $("task-search").value.trim().toLowerCase();
+  const owner = $("task-owner-filter").value;
+  const status = $("task-status-filter").value;
+  const filtered = dashboardTasks.filter(task => {
+    const text = `${task.task || ""} ${task.request || ""} ${task.assignee || ""}`.toLowerCase();
+    return (!query || text.includes(query))
+      && (owner === "all" || task.assignee === owner)
+      && (status === "all" || task.status === status);
+  });
+  const total = dashboardTasks.filter(task => task.status !== "변경됨").length;
+  const completed = dashboardTasks.filter(task => task.status === "완료").length;
+  const percent = total ? Math.round((completed / total) * 100) : 0;
+  $("task-progress-percent").textContent = `${percent}%`;
+  $("task-progress-copy").textContent = `${completed} / ${total} 완료`;
+  $("task-progress-ring").style.setProperty("--progress", `${percent * 3.6}deg`);
+  if (!filtered.length) {
+    box.innerHTML = '<div class="empty-state">조건에 맞는 할 일이 없습니다.</div>';
+    return;
+  }
+  box.innerHTML = filtered.map(task => {
+    const priority = taskPriority(task);
+    const done = task.status === "완료";
+    return `
+      <article class="task-page-row ${done ? "done" : ""}">
+        <button class="task-checkbox ${done ? "checked" : ""}" type="button" aria-label="${escapeHtml(task.task)} 완료 상태 변경" onclick="updateTaskStatus(${task.transcriptId},${task.id},'${done ? "대기" : "완료"}',false)">✓</button>
+        <div class="task-page-copy"><div><span class="priority-badge ${priority.key}">${priority.label}</span><b>${escapeHtml(task.task || "업무 항목")}</b></div><p>${escapeHtml(task.request || task.transcriptTitle || "")}</p><small>${escapeHtml(task.assignee || "담당 미지정")} · ${escapeHtml(task.due || "기한 미정")} · ${escapeHtml(task.transcriptTitle || `회의록 #${task.transcriptId}`)}</small></div>
+        <div class="task-row-actions"><button class="button ghost compact" type="button" onclick="openTranscript(${task.transcriptId})">회의 보기</button><button class="archive-task-button" type="button" onclick="archiveTask(${task.transcriptId},${task.id})">보관</button></div>
+      </article>
+    `;
+  }).join("");
+}
+
+async function loadArchive() {
+  const box = $("archive-list");
+  box.innerHTML = '<div class="empty-state paper-panel">아카이브를 불러오고 있습니다.</div>';
+  try {
+    const [meetingResponse, taskResponse] = await Promise.all([
+      api("/transcripts/archive"),
+      api("/transcripts/tasks/archive"),
+    ]);
+    archivedTranscripts = await meetingResponse.json();
+    archivedTasks = await taskResponse.json();
+    renderArchive();
+  } catch (error) {
+    box.innerHTML = `<div class="analysis-error">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderArchive() {
+  const box = $("archive-list");
+  if (!box) return;
+  const query = $("archive-search").value.trim().toLowerCase();
+  const type = $("archive-type-filter").value;
+  const meetings = archivedTranscripts
+    .filter(item => type === "all" || type === "meeting")
+    .filter(item => `${item.title || ""} ${item.summary || ""}`.toLowerCase().includes(query))
+    .map(item => ({ ...item, archiveType: "meeting" }));
+  const tasks = archivedTasks
+    .filter(item => type === "all" || type === "task")
+    .filter(item => `${item.task || ""} ${item.request || ""} ${item.transcript_title || ""}`.toLowerCase().includes(query))
+    .map(item => ({ ...item, archiveType: "task" }));
+  const filtered = [...meetings, ...tasks].sort((a, b) => new Date(b.archived_at || 0) - new Date(a.archived_at || 0));
+  $("archive-count").textContent = filtered.length;
+  if (!filtered.length) {
+    box.innerHTML = '<div class="empty-state paper-panel">보관된 항목이 없습니다.</div>';
+    return;
+  }
+  box.innerHTML = filtered.map(item => item.archiveType === "meeting" ? `
+    <article class="archive-card paper-panel">
+      <span class="archive-icon">▱</span>
+      <div><span class="label-caps">MEETING</span><h2>${escapeHtml(item.title || `회의록 #${item.id}`)}</h2><p>${escapeHtml(item.summary || "저장된 요약이 없습니다.")}</p><small>보관일 ${escapeHtml(formatDate(item.archived_at, true))} · 할 일 ${item.task_count || 0}개</small></div>
+      <div class="archive-actions"><button class="button ghost compact" type="button" onclick="restoreTranscript(${item.id})">복구</button><button class="delete-button" type="button" onclick="deleteArchivedTranscript(${item.id})">영구 삭제</button></div>
+    </article>
+  ` : `
+    <article class="archive-card paper-panel">
+      <span class="archive-icon task">✓</span>
+      <div><span class="label-caps">TASK</span><h2>${escapeHtml(item.task || `할 일 #${item.id}`)}</h2><p>${escapeHtml(item.request || item.transcript_title || "업무 설명이 없습니다.")}</p><small>보관일 ${escapeHtml(formatDate(item.archived_at, true))} · ${escapeHtml(item.assignee || "담당 미지정")} · ${escapeHtml(item.due || "기한 미정")}</small></div>
+      <div class="archive-actions"><button class="button ghost compact" type="button" onclick="restoreArchivedTask(${item.transcript_id},${item.id})">복구</button><button class="delete-button" type="button" onclick="deleteArchivedTask(${item.transcript_id},${item.id})">영구 삭제</button></div>
+    </article>
+  `).join("");
+}
+
+async function archiveTranscript(id) {
+  try {
+    await api(`/transcripts/${id}/archive`, { method: "POST" });
+    await refreshDashboard();
+    showToast("회의를 아카이브로 이동했습니다.");
+    if (currentPage === "meetings") renderAllMeetings();
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
+async function archiveCurrentTranscript() {
+  if (!currentTranscriptId) return;
+  $("detail-menu").classList.add("hidden");
+  const id = currentTranscriptId;
+  await archiveTranscript(id);
+  showPage("archive");
+}
+
+async function archiveTask(transcriptId, taskId) {
+  try {
+    await api(`/transcripts/${transcriptId}/tasks/${taskId}/archive`, { method: "POST" });
+    await refreshDashboard();
+    showToast("할 일을 아카이브로 이동했습니다.");
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
+async function restoreTranscript(id) {
+  try {
+    await api(`/transcripts/${id}/restore`, { method: "POST" });
+    await Promise.all([refreshDashboard(), loadArchive()]);
+    showToast("회의를 아카이브에서 복구했습니다.");
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
+async function restoreArchivedTask(transcriptId, taskId) {
+  try {
+    await api(`/transcripts/${transcriptId}/tasks/${taskId}/restore`, { method: "POST" });
+    await Promise.all([refreshDashboard(), loadArchive()]);
+    showToast("할 일을 아카이브에서 복구했습니다.");
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
+async function deleteArchivedTranscript(id) {
+  const target = archivedTranscripts.find(item => item.id === id);
+  if (!window.confirm(`"${target?.title || `회의록 #${id}`}"을(를) 영구 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) return;
+  try {
+    await api(`/transcripts/${id}`, { method: "DELETE" });
+    await loadArchive();
+    showToast("보관된 회의를 영구 삭제했습니다.");
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
+async function deleteArchivedTask(transcriptId, taskId) {
+  const target = archivedTasks.find(item => item.id === taskId);
+  if (!window.confirm(`"${target?.task || `할 일 #${taskId}`}"을(를) 영구 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) return;
+  try {
+    await api(`/transcripts/${transcriptId}/tasks/${taskId}`, { method: "DELETE" });
+    await loadArchive();
+    showToast("보관된 할 일을 영구 삭제했습니다.");
+  } catch (error) {
+    showToast(error.message, "error");
+  }
 }
 
 function openComposer() {
@@ -493,10 +752,13 @@ function encodeWav(chunks, sampleRate) {
 }
 
 async function openTranscript(id) {
+  if (currentTranscriptId !== id) detailReturnPage = currentPage;
   currentTranscriptId = id;
   toggleSidebar(false);
-  $("dashboard-view").classList.add("hidden");
+  ["dashboard-view", "all-meetings-view", "tasks-view", "archive-view"].forEach(viewId => $(viewId).classList.add("hidden"));
   $("meeting-detail").classList.remove("hidden");
+  $("page-header-label").textContent = "MEETING";
+  $("workspace-caption").textContent = "회의 상세 및 AI 요약";
   $("detail-title").textContent = "회의록을 불러오는 중입니다.";
   $("detail-meta").textContent = "";
   $("detail-content").value = "";
@@ -554,7 +816,7 @@ function renderDetailTasks(transcriptId, tasks) {
     return;
   }
   $("detail-tasks").innerHTML = tasks.map(task => `
-    <div class="detail-task">
+    <div class="detail-task ${task.status === "완료" ? "done" : ""}">
       <button class="event-check ${task.status === "완료" ? "done" : ""}" type="button" onclick="updateTaskStatus(${transcriptId},${task.id},'${task.status === "완료" ? "대기" : "완료"}',true)">✓</button>
       <div class="detail-task-content"><b>${escapeHtml(task.task || "업무 항목")}</b><small>${escapeHtml(task.assignee || "담당 미지정")} · ${escapeHtml(task.due || "기한 미정")}${task.request ? ` · ${escapeHtml(task.request)}` : ""}</small></div>
       <select class="status-select" aria-label="업무 상태" onchange="updateTaskStatus(${transcriptId},${task.id},this.value,true)">
@@ -679,6 +941,7 @@ async function updateTaskStatus(transcriptId, taskId, status, reopen = false) {
     });
     await refreshDashboard();
     if (reopen && currentTranscriptId === transcriptId) await openTranscript(transcriptId);
+    else if (currentPage === "tasks") renderTasksPage();
   } catch (error) {
     showToast(error.message, "error");
   }

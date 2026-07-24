@@ -125,6 +125,7 @@ flowchart LR
 ├── scripts/
 │   ├── migrate_action_items_rag.py # 업무 임베딩·일정 변경 증분 마이그레이션
 │   ├── migrate_analysis_jobs.py     # 백그라운드 분석 상태 컬럼 증분 마이그레이션
+│   ├── migrate_transcript_archive.py # 회의·할 일 아카이브 증분 마이그레이션
 │   ├── migrate_transcript_titles.py # 자동·수동 회의 제목 증분 마이그레이션
 │   └── seed_users.py                # 로컬 개발용 사용자 데이터
 ├── tests/                          # 단위 테스트
@@ -191,7 +192,7 @@ CLOVA_SPEECH_SECRET=
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-현재 저장소는 기본 테이블이 구성된 데이터베이스를 전제로 하며, 완전한 초기 스키마 마이그레이션 체인은 아직 포함하지 않습니다. `scripts/migrate_action_items_rag.py`는 기존 `action_items` 테이블에 상태, 임베딩 및 일정 변경 관계를 추가하고, `scripts/migrate_transcript_titles.py`는 기존 `transcripts` 테이블에 자동·수동 제목 필드를 추가합니다. `scripts/migrate_analysis_jobs.py`는 긴 LLM 분석을 백그라운드에서 추적하기 위한 상태와 오류 컬럼을 추가합니다.
+현재 저장소는 기본 테이블이 구성된 데이터베이스를 전제로 하며, 완전한 초기 스키마 마이그레이션 체인은 아직 포함하지 않습니다. `scripts/migrate_action_items_rag.py`는 기존 `action_items` 테이블에 상태, 임베딩 및 일정 변경 관계를 추가하고, `scripts/migrate_transcript_titles.py`는 기존 `transcripts` 테이블에 자동·수동 제목 필드를 추가합니다. `scripts/migrate_analysis_jobs.py`는 긴 LLM 분석을 백그라운드에서 추적하기 위한 상태와 오류 컬럼을 추가하며, `scripts/migrate_transcript_archive.py`는 회의와 할 일의 보관 상태 및 보관 시각 컬럼을 추가합니다.
 
 기존 스키마에 증분 마이그레이션을 적용할 때:
 
@@ -199,6 +200,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 uv run python scripts/migrate_action_items_rag.py
 uv run python scripts/migrate_transcript_titles.py
 uv run python scripts/migrate_analysis_jobs.py
+uv run python scripts/migrate_transcript_archive.py
 ```
 
 로컬 개발용 사용자를 추가할 때:
