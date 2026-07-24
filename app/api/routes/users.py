@@ -12,6 +12,7 @@ router = APIRouter(tags=["users"])
 def read_me(current_user: User = Depends(get_current_user)):
     return {
         "username": current_user.username,
+        "display_name": current_user.display_name,
         "department": current_user.department.value,
         "role": current_user.role.value,
         "status": current_user.status.value,
@@ -24,7 +25,12 @@ def list_same_department(
 ):
     users = db.query(User).filter(User.department == current_user.department).all()
     return [
-        {"username": u.username, "department": u.department.value, "role": u.role.value}
+        {
+            "username": u.username,
+            "display_name": u.display_name,
+            "department": u.department.value,
+            "role": u.role.value,
+        }
         for u in users
     ]
 
@@ -42,6 +48,7 @@ def list_pending_users(
         {
             "id": u.id,
             "username": u.username,
+            "display_name": u.display_name,
             "department": u.department.value,
             "role": u.role.value,
         }
@@ -64,7 +71,12 @@ def approve_user(
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
     user.status = Status.approved
     db.commit()
-    return {"id": user.id, "username": user.username, "status": user.status.value}
+    return {
+        "id": user.id,
+        "username": user.username,
+        "display_name": user.display_name,
+        "status": user.status.value,
+    }
 
 
 @router.post("/users/{user_id}/reject")
@@ -82,4 +94,9 @@ def reject_user(
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
     user.status = Status.rejected
     db.commit()
-    return {"id": user.id, "username": user.username, "status": user.status.value}
+    return {
+        "id": user.id,
+        "username": user.username,
+        "display_name": user.display_name,
+        "status": user.status.value,
+    }

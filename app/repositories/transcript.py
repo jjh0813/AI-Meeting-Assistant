@@ -15,7 +15,9 @@ def create_transcript(
     db: Session, current_user: User, masked_content: str, pii_items: list[dict]
 ) -> Transcript:
     transcript = Transcript(
-        department=current_user.department, masked_content=masked_content
+        owner_user_id=current_user.id,
+        department=current_user.department,
+        masked_content=masked_content,
     )
     db.add(transcript)
     db.flush()
@@ -26,6 +28,7 @@ def create_transcript(
                 department=current_user.department,
                 pii_type=item["pii_type"],
                 original_value=item["original_value"],
+                placeholder_token=item.get("placeholder_token"),
             )
         )
     db.commit()
@@ -37,7 +40,7 @@ def list_transcripts(db: Session, current_user: User) -> list[Transcript]:
     return (
         db.query(Transcript)
         .filter(
-            Transcript.department == current_user.department,
+            Transcript.owner_user_id == current_user.id,
             Transcript.archived.is_(False),
         )
         .order_by(Transcript.created_at.desc(), Transcript.id.desc())
@@ -51,7 +54,7 @@ def list_archived_transcripts(
     return (
         db.query(Transcript)
         .filter(
-            Transcript.department == current_user.department,
+            Transcript.owner_user_id == current_user.id,
             Transcript.archived.is_(True),
         )
         .order_by(Transcript.archived_at.desc(), Transcript.id.desc())
@@ -64,10 +67,12 @@ def get_pii_entries(
 ) -> list[PiiEntry]:
     return (
         db.query(PiiEntry)
+        .join(Transcript, Transcript.id == PiiEntry.transcript_id)
         .filter(
             PiiEntry.transcript_id == transcript_id,
-            PiiEntry.department == current_user.department,
+            Transcript.owner_user_id == current_user.id,
         )
+        .order_by(PiiEntry.id)
         .all()
     )
 
@@ -77,7 +82,7 @@ def get_transcript(db: Session, current_user: User, transcript_id: int):
         db.query(Transcript)
         .filter(
             Transcript.id == transcript_id,
-            Transcript.department == current_user.department,
+            Transcript.owner_user_id == current_user.id,
         )
         .first()
     )
@@ -114,6 +119,7 @@ def update_transcript(
                 department=current_user.department,
                 pii_type=item["pii_type"],
                 original_value=item["original_value"],
+                placeholder_token=item.get("placeholder_token"),
             )
         )
     db.query(ActionItem).filter(ActionItem.transcript_id == transcript_id).delete()
@@ -266,9 +272,10 @@ def get_action_items(
 ) -> list[ActionItem]:
     return (
         db.query(ActionItem)
+        .join(Transcript, Transcript.id == ActionItem.transcript_id)
         .filter(
             ActionItem.transcript_id == transcript_id,
-            ActionItem.department == current_user.department,
+            Transcript.owner_user_id == current_user.id,
             ActionItem.archived.is_(False),
         )
         .all()
@@ -280,7 +287,7 @@ def list_archived_action_items(db: Session, current_user: User):
         db.query(ActionItem, Transcript)
         .join(Transcript, Transcript.id == ActionItem.transcript_id)
         .filter(
-            ActionItem.department == current_user.department,
+            Transcript.owner_user_id == current_user.id,
             ActionItem.archived.is_(True),
         )
         .order_by(ActionItem.archived_at.desc(), ActionItem.id.desc())
@@ -296,10 +303,11 @@ def get_action_item(
 ):
     return (
         db.query(ActionItem)
+        .join(Transcript, Transcript.id == ActionItem.transcript_id)
         .filter(
             ActionItem.id == action_item_id,
             ActionItem.transcript_id == transcript_id,
-            ActionItem.department == current_user.department,
+            Transcript.owner_user_id == current_user.id,
         )
         .first()
     )
@@ -312,9 +320,10 @@ def get_action_item_by_id(
 ):
     return (
         db.query(ActionItem)
+        .join(Transcript, Transcript.id == ActionItem.transcript_id)
         .filter(
             ActionItem.id == action_item_id,
-            ActionItem.department == current_user.department,
+            Transcript.owner_user_id == current_user.id,
         )
         .first()
     )
@@ -373,7 +382,7 @@ def search_similar_action_items(
         db.query(ActionItem, distance)
         .join(Transcript, Transcript.id == ActionItem.transcript_id)
         .filter(
-            ActionItem.department == current_user.department,
+            Transcript.owner_user_id == current_user.id,
             ActionItem.archived.is_(False),
             Transcript.archived.is_(False),
             ActionItem.transcript_id != exclude_transcript_id,
@@ -402,7 +411,7 @@ def search_action_items_for_qa(
         db.query(ActionItem, Transcript, distance)
         .join(Transcript, Transcript.id == ActionItem.transcript_id)
         .filter(
-            ActionItem.department == current_user.department,
+            Transcript.owner_user_id == current_user.id,
             ActionItem.archived.is_(False),
             Transcript.archived.is_(False),
             ActionItem.status.notin_(
@@ -427,9 +436,11 @@ def get_action_item_similarity(
     )
     row = (
         db.query(distance)
+        .select_from(ActionItem)
+        .join(Transcript, Transcript.id == ActionItem.transcript_id)
         .filter(
             ActionItem.id == candidate_id,
-            ActionItem.department == current_user.department,
+            Transcript.owner_user_id == current_user.id,
             ActionItem.task_embedding.is_not(None),
         )
         .first()
@@ -459,7 +470,7 @@ def search_similar_summaries(
     return (
         db.query(Transcript, distance)
         .filter(
-            Transcript.department == current_user.department,
+            Transcript.owner_user_id == current_user.id,
             Transcript.archived.is_(False),
             Transcript.summary.is_not(None),
             Transcript.summary_embedding.is_not(None),
@@ -481,8 +492,7 @@ def search_similar_chunks(
         db.query(TranscriptChunk, Transcript, distance)
         .join(Transcript, Transcript.id == TranscriptChunk.transcript_id)
         .filter(
-            TranscriptChunk.department == current_user.department,
-            Transcript.department == current_user.department,
+            Transcript.owner_user_id == current_user.id,
             Transcript.archived.is_(False),
             TranscriptChunk.embedding.is_not(None),
         )

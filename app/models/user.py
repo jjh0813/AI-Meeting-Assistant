@@ -28,6 +28,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, nullable=False)
+    display_name = Column(String, nullable=False)
     hashed_password = Column(String, nullable=False)
     department = Column(Enum(Department), nullable=False)
     role = Column(Enum(Role), nullable=False, default=Role.member)

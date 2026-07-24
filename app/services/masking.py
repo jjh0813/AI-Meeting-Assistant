@@ -29,12 +29,24 @@ def _name_score(candidate: str, following: str) -> float:
     return score
 
 
-def mask_text(text: str):
+def mask_text(text: str, initial_counts: dict[str, int] | None = None):
     found = []
+    counters = {
+        "phone": int((initial_counts or {}).get("phone", 0)),
+        "name": int((initial_counts or {}).get("name", 0)),
+    }
 
     def _mask_phone(match):
-        found.append({"pii_type": "phone", "original_value": match.group()})
-        return "[전화번호]"
+        counters["phone"] += 1
+        token = f"[전화번호#{counters['phone']}]"
+        found.append(
+            {
+                "pii_type": "phone",
+                "original_value": match.group(),
+                "placeholder_token": token,
+            }
+        )
+        return token
 
     masked = PHONE_PATTERN.sub(_mask_phone, text)
 
@@ -44,8 +56,16 @@ def mask_text(text: str):
             return candidate
         following = match.string[match.end():match.end() + 6]
         if _name_score(candidate, following) >= NAME_THRESHOLD:
-            found.append({"pii_type": "name", "original_value": candidate})
-            return "[이름]"
+            counters["name"] += 1
+            token = f"[이름#{counters['name']}]"
+            found.append(
+                {
+                    "pii_type": "name",
+                    "original_value": candidate,
+                    "placeholder_token": token,
+                }
+            )
+            return token
         return candidate
 
     masked = NAME_CANDIDATE.sub(_mask_name, masked)

@@ -19,6 +19,9 @@ class Transcript(Base):
     __tablename__ = "transcripts"
 
     id = Column(Integer, primary_key=True, index=True)
+    owner_user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     department = Column(Enum(Department), nullable=False)
     title = Column(Text, nullable=True)
     title_is_manual = Column(Boolean, nullable=False, default=False)
@@ -42,6 +45,7 @@ class PiiEntry(Base):
     department = Column(Enum(Department), nullable=False)
     pii_type = Column(Text, nullable=False)
     original_value = Column(Text, nullable=False)
+    placeholder_token = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

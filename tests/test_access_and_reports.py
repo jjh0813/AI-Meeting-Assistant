@@ -22,10 +22,11 @@ class AccessAndReportTests(unittest.TestCase):
         self.assertIn("get_approved_user", dependency_names)
         self.assertNotIn("get_current_user", dependency_names)
 
+    @patch("app.api.routes.transcripts.transcript_repo.get_pii_entries")
     @patch("app.api.routes.transcripts.transcript_repo.get_action_items")
     @patch("app.api.routes.transcripts.transcript_repo.get_transcript")
     def test_stored_analysis_uses_persisted_summary_and_tasks(
-        self, get_transcript, get_action_items
+        self, get_transcript, get_action_items, get_pii_entries
     ):
         get_transcript.return_value = SimpleNamespace(
             id=7, title="월말 결산 점검", summary="저장된 요약"
@@ -41,8 +42,10 @@ class AccessAndReportTests(unittest.TestCase):
                 superseded_by_id=None,
             )
         ]
+        get_pii_entries.return_value = []
+        current_user = SimpleNamespace(display_name="김철수")
 
-        transcript, analysis = stored_analysis(Mock(), Mock(), 7)
+        transcript, analysis = stored_analysis(Mock(), current_user, 7)
 
         self.assertEqual(transcript.id, 7)
         self.assertEqual(analysis["title"], "월말 결산 점검")

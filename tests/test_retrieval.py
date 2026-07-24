@@ -3,6 +3,7 @@ import unittest
 from app.services.retrieval import (
     allows_semantic_only_evidence,
     answer_indicates_missing_evidence,
+    asks_for_personal_tasks,
     has_sufficient_evidence,
     lexical_similarity,
     rerank_sources,
@@ -51,6 +52,10 @@ class RetrievalTests(unittest.TestCase):
         self.assertTrue(allows_semantic_only_evidence("내가 맡은 업무를 알려줘"))
         self.assertTrue(
             has_sufficient_evidence(source, allow_semantic_only=True)
+        )
+        self.assertTrue(asks_for_personal_tasks("내가 맡은 업무를 알려줘"))
+        self.assertFalse(
+            asks_for_personal_tasks("회의에서 정해진 담당 업무를 알려줘")
         )
 
     def test_unresolved_question_allows_semantic_evidence(self):

@@ -77,6 +77,10 @@ _SEMANTIC_INTENT_TERMS = (
     "확정되지",
     "추가 논의",
 )
+_PERSONAL_TASK_PATTERNS = (
+    re.compile(r"(내가|나는|저는|제가).{0,12}(업무|할\s*일|담당|맡)"),
+    re.compile(r"(내|나의|저의)\s*(업무|할\s*일|담당)"),
+)
 
 
 def _strip_particle(token: str) -> str:
@@ -152,6 +156,11 @@ def allows_semantic_only_evidence(question: str) -> bool:
     """Allow semantic retrieval for common meeting intents with generic wording."""
     normalized = re.sub(r"\s+", " ", question.lower()).strip()
     return any(term in normalized for term in _SEMANTIC_INTENT_TERMS)
+
+
+def asks_for_personal_tasks(question: str) -> bool:
+    normalized = re.sub(r"\s+", " ", question.lower()).strip()
+    return any(pattern.search(normalized) for pattern in _PERSONAL_TASK_PATTERNS)
 
 
 def has_sufficient_evidence(

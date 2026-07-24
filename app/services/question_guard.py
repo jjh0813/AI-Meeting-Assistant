@@ -2,7 +2,7 @@ import re
 
 
 MEETING_ONLY_MESSAGE = (
-    "Noting은 내 부서 회의록과 업무 관련 질문만 답할 수 있습니다. "
+    "Noting은 내 회의록과 업무 관련 질문만 답할 수 있습니다. "
     "회의 주제, 업무, 일정 또는 담당자를 포함해 질문해 주세요."
 )
 AMBIGUOUS_QUESTION_MESSAGE = (

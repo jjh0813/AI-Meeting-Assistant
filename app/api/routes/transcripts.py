@@ -28,12 +28,18 @@ from app.services.analyzer import analyze, summarize
 from app.services.chunking import split_text
 from app.services.embedding import embed
 from app.services.masking import mask_text
+from app.services.personalization import (
+    is_assigned_to_user,
+    personalize_masked_text,
+    remask_personalized_text,
+)
 from app.services.qa import answer_from_meetings
 from app.services.question_guard import guard_meeting_question
 from app.services.report import build_pdf_report, build_text_report
 from app.services.retrieval import (
     allows_semantic_only_evidence,
     answer_indicates_missing_evidence,
+    asks_for_personal_tasks,
     has_sufficient_evidence,
     rerank_sources,
 )
@@ -43,7 +49,7 @@ router = APIRouter(prefix="/transcripts", tags=["transcripts"])
 logger = logging.getLogger(__name__)
 
 MIN_TASK_DUPLICATE_SIMILARITY = 0.75
-MEETING_ONLY_MESSAGE = "Noting은 내 부서 회의록과 업무 관련 질문만 답할 수 있습니다."
+MEETING_ONLY_MESSAGE = "Noting은 내 회의록과 업무 관련 질문만 답할 수 있습니다."
 NO_EVIDENCE_MESSAGE = "질문과 관련된 내용을 회의록에서 확인할 수 없습니다."
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 ALLOWED_AUDIO_EXTENSIONS = {
@@ -95,29 +101,53 @@ def read_audio_upload(file: UploadFile) -> bytes:
     return audio_bytes
 
 
-def serialize_action_item(item) -> dict:
+def serialize_action_item(item, pii_entries, current_user: User) -> dict:
     return {
         "id": item.id,
-        "task": item.task,
-        "assignee": item.assignee,
-        "due": item.due,
-        "request": item.request,
+        "task": personalize_masked_text(
+            item.task, pii_entries, current_user.display_name
+        ),
+        "assignee": personalize_masked_text(
+            item.assignee, pii_entries, current_user.display_name
+        ),
+        "due": personalize_masked_text(
+            item.due, pii_entries, current_user.display_name
+        ),
+        "request": personalize_masked_text(
+            item.request, pii_entries, current_user.display_name
+        ),
         "status": item.status.value,
         "superseded_by_id": item.superseded_by_id,
+        "is_mine": is_assigned_to_user(
+            item.assignee, pii_entries, current_user.display_name
+        ),
     }
 
 
-def serialize_transcript(transcript: Transcript) -> dict:
+def serialize_transcript(
+    db: Session, current_user: User, transcript: Transcript
+) -> dict:
+    pii_entries = transcript_repo.get_pii_entries(
+        db, current_user, transcript.id
+    )
     analysis_status = transcript.analysis_status or (
         "completed" if transcript.summary is not None else "pending"
     )
     return {
         "id": transcript.id,
-        "title": transcript.title or f"회의록 #{transcript.id}",
+        "title": personalize_masked_text(
+            transcript.title or f"회의록 #{transcript.id}",
+            pii_entries,
+            current_user.display_name,
+        ),
         "title_is_manual": transcript.title_is_manual,
         "department": transcript.department.value,
-        "masked_content": transcript.masked_content,
-        "summary": transcript.summary,
+        "masked_content": personalize_masked_text(
+            transcript.masked_content, pii_entries, current_user.display_name
+        ),
+        "summary": personalize_masked_text(
+            transcript.summary, pii_entries, current_user.display_name
+        ),
         "analysis_status": analysis_status,
         "analysis_error": transcript.analysis_error,
         "created_at": transcript.created_at.isoformat()
@@ -136,10 +166,20 @@ def stored_analysis(db: Session, current_user: User, transcript_id: int):
             detail="보고서를 만들기 전에 회의록을 분석해 주세요.",
         )
     items = transcript_repo.get_action_items(db, current_user, transcript_id)
+    pii_entries = transcript_repo.get_pii_entries(db, current_user, transcript_id)
     return transcript, {
-        "title": transcript.title or f"회의록 #{transcript.id}",
-        "summary": transcript.summary,
-        "tasks": [serialize_action_item(item) for item in items],
+        "title": personalize_masked_text(
+            transcript.title or f"회의록 #{transcript.id}",
+            pii_entries,
+            current_user.display_name,
+        ),
+        "summary": personalize_masked_text(
+            transcript.summary, pii_entries, current_user.display_name
+        ),
+        "tasks": [
+            serialize_action_item(item, pii_entries, current_user)
+            for item in items
+        ],
     }
 
 
@@ -192,32 +232,59 @@ def find_rag_sources(
     task_matches = transcript_repo.search_action_items_for_qa(
         db, current_user, query_embedding, candidate_limit
     )
-    task_sources = [
-        {
-            "id": transcript.id,
-            "chunk_id": None,
-            "chunk_index": None,
-            "content": "\n".join(
-                (
-                    f"업무: {item.task or '업무명 없음'}",
-                    f"담당자: {item.assignee or '담당 미지정'}",
-                    f"기한: {item.due or '기한 미정'}",
-                    f"요청사항: {item.request or '요청사항 없음'}",
-                    f"상태: {item.status.value}",
-                )
-            ),
-            "summary": transcript.summary,
-            "source_type": "action_item",
-            "similarity": round(1 - float(distance), 4),
-            "created_at": transcript.created_at.isoformat()
-            if transcript.created_at
-            else None,
-        }
-        for item, transcript, distance in task_matches
-    ]
-    return rerank_sources(
-        query, chunk_sources + summary_sources + task_sources, limit
-    )
+    personal_task_query = asks_for_personal_tasks(query)
+    task_sources = []
+    for item, transcript, distance in task_matches:
+        pii_entries = transcript_repo.get_pii_entries(
+            db, current_user, transcript.id
+        )
+        if personal_task_query and not is_assigned_to_user(
+            item.assignee, pii_entries, current_user.display_name
+        ):
+            continue
+        task_sources.append(
+            {
+                "id": transcript.id,
+                "chunk_id": None,
+                "chunk_index": None,
+                "content": "\n".join(
+                    (
+                        f"업무: {item.task or '업무명 없음'}",
+                        f"담당자: {item.assignee or '담당 미지정'}",
+                        f"기한: {item.due or '기한 미정'}",
+                        f"요청사항: {item.request or '요청사항 없음'}",
+                        f"상태: {item.status.value}",
+                    )
+                ),
+                "summary": transcript.summary,
+                "source_type": "action_item",
+                "similarity": round(1 - float(distance), 4),
+                "created_at": transcript.created_at.isoformat()
+                if transcript.created_at
+                else None,
+            }
+        )
+    pii_cache = {}
+    personalized_sources = []
+    for source in chunk_sources + summary_sources + task_sources:
+        transcript_id = source["id"]
+        if transcript_id not in pii_cache:
+            pii_cache[transcript_id] = transcript_repo.get_pii_entries(
+                db, current_user, transcript_id
+            )
+        pii_entries = pii_cache[transcript_id]
+        personalized_sources.append(
+            {
+                **source,
+                "content": personalize_masked_text(
+                    source["content"], pii_entries, current_user.display_name
+                ),
+                "summary": personalize_masked_text(
+                    source["summary"], pii_entries, current_user.display_name
+                ),
+            }
+        )
+    return rerank_sources(query, personalized_sources, limit)
 
 
 def run_analysis_pipeline(db: Session, current_user: User, transcript: Transcript):
@@ -262,12 +329,24 @@ def run_analysis_pipeline(db: Session, current_user: User, transcript: Transcrip
         indexed_chunks,
     )
     saved_items = transcript_repo.get_action_items(db, current_user, transcript.id)
+    pii_entries = transcript_repo.get_pii_entries(
+        db, current_user, transcript.id
+    )
     return {
         "id": transcript.id,
-        "title": transcript.title or f"회의록 #{transcript.id}",
+        "title": personalize_masked_text(
+            transcript.title or f"회의록 #{transcript.id}",
+            pii_entries,
+            current_user.display_name,
+        ),
         "title_is_manual": transcript.title_is_manual,
-        "summary": result["summary"],
-        "tasks": [serialize_action_item(item) for item in saved_items],
+        "summary": personalize_masked_text(
+            result["summary"], pii_entries, current_user.display_name
+        ),
+        "tasks": [
+            serialize_action_item(item, pii_entries, current_user)
+            for item in saved_items
+        ],
         "indexed_chunks": len(indexed_chunks),
         "indexed_tasks": sum(
             1 for task in indexed_tasks if task["task_embedding"] is not None
@@ -311,7 +390,7 @@ def create_transcript(
         db, current_user, masked_content, pii_items
     )
     return {
-        **serialize_transcript(transcript),
+        **serialize_transcript(db, current_user, transcript),
     }
 
 
@@ -320,7 +399,7 @@ def list_transcripts(
     current_user: User = Depends(get_approved_user), db: Session = Depends(get_db)
 ):
     transcripts = transcript_repo.list_transcripts(db, current_user)
-    return [serialize_transcript(t) for t in transcripts]
+    return [serialize_transcript(db, current_user, t) for t in transcripts]
 
 
 @router.get("/archive")
@@ -330,7 +409,7 @@ def list_archived_transcripts(
     transcripts = transcript_repo.list_archived_transcripts(db, current_user)
     return [
         {
-            **serialize_transcript(transcript),
+            **serialize_transcript(db, current_user, transcript),
             "archived_at": transcript.archived_at.isoformat()
             if transcript.archived_at
             else None,
@@ -347,17 +426,29 @@ def list_archived_tasks(
     current_user: User = Depends(get_approved_user), db: Session = Depends(get_db)
 ):
     rows = transcript_repo.list_archived_action_items(db, current_user)
-    return [
-        {
-            **serialize_action_item(item),
-            "transcript_id": transcript.id,
-            "transcript_title": transcript.title or f"회의록 #{transcript.id}",
-            "archived_at": item.archived_at.isoformat()
-            if item.archived_at
-            else None,
-        }
-        for item, transcript in rows
-    ]
+    results = []
+    for item, transcript in rows:
+        pii_entries = transcript_repo.get_pii_entries(
+            db, current_user, transcript.id
+        )
+        serialized = serialize_action_item(item, pii_entries, current_user)
+        if not serialized["is_mine"]:
+            continue
+        results.append(
+            {
+                **serialized,
+                "transcript_id": transcript.id,
+                "transcript_title": personalize_masked_text(
+                    transcript.title or f"회의록 #{transcript.id}",
+                    pii_entries,
+                    current_user.display_name,
+                ),
+                "archived_at": item.archived_at.isoformat()
+                if item.archived_at
+                else None,
+            }
+        )
+    return results
 
 
 @router.post("/search")
@@ -433,7 +524,9 @@ def ask_about_meetings(
             "blocked_reason": "low_similarity",
         }
 
-    answer = answer_from_meetings(question, sources)
+    answer = answer_from_meetings(
+        question, sources, current_user.display_name
+    )
     if answer_indicates_missing_evidence(answer):
         return {
             "answer": answer,
@@ -472,8 +565,17 @@ def summarize_transcript(
     transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
     if transcript is None:
         raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
-    summary = summarize(transcript.masked_content)
-    return {"id": transcript.id, "summary": summary}
+    pii_entries = transcript_repo.get_pii_entries(db, current_user, transcript_id)
+    safe_content = personalize_masked_text(
+        transcript.masked_content, pii_entries, current_user.display_name
+    )
+    summary = summarize(safe_content)
+    return {
+        "id": transcript.id,
+        "summary": personalize_masked_text(
+            summary, pii_entries, current_user.display_name
+        ),
+    }
 
 
 @router.post("/{transcript_id}/analysis")
@@ -518,19 +620,31 @@ def get_transcript_tasks(
     if transcript is None:
         raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
     items = transcript_repo.get_action_items(db, current_user, transcript_id)
+    pii_entries = transcript_repo.get_pii_entries(db, current_user, transcript_id)
     return {
         "id": transcript.id,
-        "title": transcript.title or f"회의록 #{transcript.id}",
+        "title": personalize_masked_text(
+            transcript.title or f"회의록 #{transcript.id}",
+            pii_entries,
+            current_user.display_name,
+        ),
         "title_is_manual": transcript.title_is_manual,
         "department": transcript.department.value,
-        "masked_content": transcript.masked_content,
+        "masked_content": personalize_masked_text(
+            transcript.masked_content, pii_entries, current_user.display_name
+        ),
         "created_at": transcript.created_at.isoformat()
         if transcript.created_at
         else None,
-        "summary": transcript.summary,
+        "summary": personalize_masked_text(
+            transcript.summary, pii_entries, current_user.display_name
+        ),
         "analysis_status": transcript.analysis_status,
         "analysis_error": transcript.analysis_error,
-        "tasks": [serialize_action_item(item) for item in items],
+        "tasks": [
+            serialize_action_item(item, pii_entries, current_user)
+            for item in items
+        ],
     }
 
 
@@ -900,21 +1014,22 @@ def update_transcript(
     current_user: User = Depends(get_approved_user),
     db: Session = Depends(get_db),
 ):
-    masked_content, pii_items = mask_text(body.content)
+    existing = transcript_repo.get_transcript(db, current_user, transcript_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
+    existing_pii = transcript_repo.get_pii_entries(
+        db, current_user, transcript_id
+    )
+    masked_content, pii_items = remask_personalized_text(
+        body.content, existing_pii, current_user.display_name
+    )
     transcript = transcript_repo.update_transcript(
         db, current_user, transcript_id, masked_content, pii_items
     )
     if transcript is None:
         raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
     return {
-        "id": transcript.id,
-        "department": transcript.department.value,
-        "masked_content": transcript.masked_content,
-        "title": transcript.title or f"회의록 #{transcript.id}",
-        "title_is_manual": transcript.title_is_manual,
-        "created_at": transcript.created_at.isoformat()
-        if transcript.created_at
-        else None,
+        **serialize_transcript(db, current_user, transcript),
         "analysis_required": True,
     }
 
@@ -931,4 +1046,4 @@ def upload_and_transcribe(
     transcript = transcript_repo.create_transcript(
         db, current_user, masked_content, pii_items
     )
-    return serialize_transcript(transcript)
+    return serialize_transcript(db, current_user, transcript)

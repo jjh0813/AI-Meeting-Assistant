@@ -50,8 +50,8 @@ function showAuth(tab) {
   $("tab-signup").classList.toggle("active", !loginMode);
   $("auth-title").textContent = loginMode ? "다시 만나서 반가워요." : "팀 작업대를 요청하세요.";
   $("auth-subtitle").textContent = loginMode
-    ? "내 부서의 회의 작업대로 로그인하세요."
-    : "관리자 승인 후 같은 부서의 회의 요약을 볼 수 있습니다.";
+    ? "내 회의 작업대로 로그인하세요."
+    : "관리자 승인 후 내 계정의 회의 작업대를 사용할 수 있습니다.";
 }
 
 function toggleSidebar(open) {
@@ -187,6 +187,7 @@ async function signup(event) {
   event?.preventDefault();
   const payload = {
     username: $("signup-username").value.trim(),
+    display_name: $("signup-display-name").value.trim(),
     password: $("signup-password").value,
     department: $("signup-department").value,
     role: $("signup-role").value,
@@ -207,9 +208,10 @@ async function loadMe() {
   me = await (await api("/me")).json();
   $("auth-view").classList.add("hidden");
   $("app-view").classList.remove("hidden");
-  $("profile-name").textContent = me.username;
-  $("profile-meta").textContent = `${me.department} · ${me.role}`;
-  $("greeting-name").textContent = me.username;
+  const displayName = me.display_name || me.username;
+  $("profile-name").textContent = displayName;
+  $("profile-meta").textContent = `@${me.username} · ${me.department} · ${me.role}`;
+  $("greeting-name").textContent = displayName;
   $("workspace-caption").textContent = `${me.department} 부서 · AI 회의 요약`;
   $("avatar").textContent = me.username.slice(0, 1).toUpperCase();
   const approved = me.status === "승인";
@@ -293,7 +295,7 @@ async function refreshDashboard() {
     }));
     dashboardTasks = taskResults.flatMap(({ transcript, data }) =>
       (data.tasks || []).map(task => ({ ...task, transcriptId: transcript.id, transcriptTitle: transcript.title })),
-    );
+    ).filter(task => task.is_mine);
     renderDashboardStats();
     renderSidebarMeetings();
     renderCalendar();
@@ -444,7 +446,7 @@ function showPage(page, targetId = null) {
   });
   const headers = {
     workspace: ["WORKSPACE", `${me?.department || ""} 부서 · AI 회의 요약`],
-    meetings: ["ALL MEETINGS", "내 부서의 전체 회의"],
+    meetings: ["ALL MEETINGS", "내 계정의 전체 회의"],
     tasks: ["TASKS", "회의에서 추출된 할 일"],
     archive: ["ARCHIVE", "보관된 회의 관리"],
   };
@@ -1143,7 +1145,7 @@ async function loadPending() {
   try {
     const items = await (await api("/users/pending")).json();
     box.innerHTML = items.length ? items.map(user => `
-      <div class="admin-row"><div><b>${escapeHtml(user.username)}</b><small>${escapeHtml(user.department)} · ${escapeHtml(user.role)}</small></div><div><button type="button" onclick="decide(${user.id},'approve')">승인</button><button class="reject" type="button" onclick="decide(${user.id},'reject')">거절</button></div></div>
+      <div class="admin-row"><div><b>${escapeHtml(user.display_name || user.username)} <small>@${escapeHtml(user.username)}</small></b><small>${escapeHtml(user.department)} · ${escapeHtml(user.role)}</small></div><div><button type="button" onclick="decide(${user.id},'approve')">승인</button><button class="reject" type="button" onclick="decide(${user.id},'reject')">거절</button></div></div>
     `).join("") : '<div class="empty-state">대기 중인 가입 요청이 없습니다.</div>';
   } catch (error) {
     box.innerHTML = `<div class="analysis-error">${escapeHtml(error.message)}</div>`;
