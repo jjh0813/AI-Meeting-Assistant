@@ -1,10 +1,19 @@
+import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Response,
+    UploadFile,
+)
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_approved_user, get_current_admin
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.models.transcript import ActionItemStatus, Transcript
 from app.models.user import User
 from app.repositories import transcript as transcript_repo
@@ -30,6 +39,7 @@ from app.services.retrieval import (
 from app.services.stt import transcribe
 
 router = APIRouter(prefix="/transcripts", tags=["transcripts"])
+logger = logging.getLogger(__name__)
 
 MIN_TASK_DUPLICATE_SIMILARITY = 0.75
 MEETING_ONLY_MESSAGE = "Noting은 내 부서 회의록과 업무 관련 질문만 답할 수 있습니다."
@@ -96,6 +106,9 @@ def serialize_action_item(item) -> dict:
 
 
 def serialize_transcript(transcript: Transcript) -> dict:
+    analysis_status = transcript.analysis_status or (
+        "completed" if transcript.summary is not None else "pending"
+    )
     return {
         "id": transcript.id,
         "title": transcript.title or f"회의록 #{transcript.id}",
@@ -103,7 +116,8 @@ def serialize_transcript(transcript: Transcript) -> dict:
         "department": transcript.department.value,
         "masked_content": transcript.masked_content,
         "summary": transcript.summary,
-        "analysis_status": "완료" if transcript.summary is not None else "분석 필요",
+        "analysis_status": analysis_status,
+        "analysis_error": transcript.analysis_error,
         "created_at": transcript.created_at.isoformat()
         if transcript.created_at
         else None,
@@ -174,6 +188,86 @@ def find_rag_sources(
         if transcript.id not in chunk_transcript_ids
     ]
     return rerank_sources(query, chunk_sources + summary_sources, limit)
+
+
+def run_analysis_pipeline(db: Session, current_user: User, transcript: Transcript):
+    result = analyze(transcript.masked_content)
+    embedding = embed(result["summary"]) if result["summary"] else None
+    indexed_chunks = []
+    for chunk_index, content in enumerate(split_text(transcript.masked_content)):
+        chunk_embedding = embed(content)
+        if chunk_embedding is not None:
+            indexed_chunks.append(
+                {
+                    "chunk_index": chunk_index,
+                    "content": content,
+                    "embedding": chunk_embedding,
+                }
+            )
+    indexed_tasks = []
+    for task in result["tasks"]:
+        task_text = " ".join(
+            value
+            for value in (
+                task.get("task", ""),
+                task.get("request", ""),
+                task.get("assignee", ""),
+                task.get("due", ""),
+            )
+            if value
+        )
+        indexed_tasks.append(
+            {
+                **task,
+                "task_embedding": embed(task_text) if task_text else None,
+            }
+        )
+    transcript_repo.save_analysis(
+        db,
+        transcript,
+        result["title"],
+        result["summary"],
+        indexed_tasks,
+        embedding,
+        indexed_chunks,
+    )
+    saved_items = transcript_repo.get_action_items(db, current_user, transcript.id)
+    return {
+        "id": transcript.id,
+        "title": transcript.title or f"회의록 #{transcript.id}",
+        "title_is_manual": transcript.title_is_manual,
+        "summary": result["summary"],
+        "tasks": [serialize_action_item(item) for item in saved_items],
+        "indexed_chunks": len(indexed_chunks),
+        "indexed_tasks": sum(
+            1 for task in indexed_tasks if task["task_embedding"] is not None
+        ),
+    }
+
+
+def run_analysis_job(transcript_id: int, user_id: int):
+    db = SessionLocal()
+    try:
+        current_user = db.query(User).filter(User.id == user_id).first()
+        if current_user is None:
+            raise RuntimeError("분석을 요청한 사용자를 찾을 수 없습니다.")
+        transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
+        if transcript is None:
+            raise RuntimeError("분석할 회의록을 찾을 수 없습니다.")
+        run_analysis_pipeline(db, current_user, transcript)
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Background analysis failed for transcript %s", transcript_id)
+        transcript = db.query(Transcript).filter(Transcript.id == transcript_id).first()
+        if transcript is not None:
+            transcript_repo.update_analysis_status(
+                db,
+                transcript,
+                "failed",
+                str(exc)[:500] or "분석 중 알 수 없는 오류가 발생했습니다.",
+            )
+    finally:
+        db.close()
 
 
 @router.post("")
@@ -321,58 +415,27 @@ def analyze_transcript(
     transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
     if transcript is None:
         raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
-    result = analyze(transcript.masked_content)
-    embedding = embed(result["summary"]) if result["summary"] else None
-    indexed_chunks = []
-    for chunk_index, content in enumerate(split_text(transcript.masked_content)):
-        chunk_embedding = embed(content)
-        if chunk_embedding is not None:
-            indexed_chunks.append(
-                {
-                    "chunk_index": chunk_index,
-                    "content": content,
-                    "embedding": chunk_embedding,
-                }
-            )
-    indexed_tasks = []
-    for task in result["tasks"]:
-        task_text = " ".join(
-            value
-            for value in (
-                task.get("task", ""),
-                task.get("request", ""),
-                task.get("assignee", ""),
-                task.get("due", ""),
-            )
-            if value
-        )
-        indexed_tasks.append(
-            {
-                **task,
-                "task_embedding": embed(task_text) if task_text else None,
-            }
-        )
-    transcript_repo.save_analysis(
-        db,
-        transcript,
-        result["title"],
-        result["summary"],
-        indexed_tasks,
-        embedding,
-        indexed_chunks,
-    )
-    saved_items = transcript_repo.get_action_items(db, current_user, transcript.id)
-    return {
-        "id": transcript.id,
-        "title": transcript.title or f"회의록 #{transcript.id}",
-        "title_is_manual": transcript.title_is_manual,
-        "summary": result["summary"],
-        "tasks": [serialize_action_item(item) for item in saved_items],
-        "indexed_chunks": len(indexed_chunks),
-        "indexed_tasks": sum(
-            1 for task in indexed_tasks if task["task_embedding"] is not None
-        ),
-    }
+    return run_analysis_pipeline(db, current_user, transcript)
+
+
+@router.post("/{transcript_id}/analysis/start", status_code=202)
+def start_transcript_analysis(
+    transcript_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_approved_user),
+    db: Session = Depends(get_db),
+):
+    transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
+    if transcript is None:
+        raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
+    if transcript.analysis_status == "completed" and transcript.summary is not None:
+        return {"id": transcript.id, "analysis_status": "completed"}
+
+    # Re-submitting a processing job is intentional: if the web process was
+    # restarted mid-analysis, the persisted state can be recovered by retrying.
+    transcript_repo.update_analysis_status(db, transcript, "processing")
+    background_tasks.add_task(run_analysis_job, transcript.id, current_user.id)
+    return {"id": transcript.id, "analysis_status": "processing"}
 
 
 @router.get("/{transcript_id}/tasks")
@@ -395,6 +458,8 @@ def get_transcript_tasks(
         if transcript.created_at
         else None,
         "summary": transcript.summary,
+        "analysis_status": transcript.analysis_status,
+        "analysis_error": transcript.analysis_error,
         "tasks": [serialize_action_item(item) for item in items],
     }
 

@@ -1,600 +1,273 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Noting | 안전한 회의록 자동화</title>
-<style>
-  :root {
-    --navy: #1d365f;
-    --blue: #3d6eea;
-    --sky: #eff5ff;
-    --ink: #172033;
-    --muted: #697386;
-    --line: #e5eaf2;
-    --surface: #ffffff;
-    --background: #f6f8fc;
-    --danger: #c3374b;
-    --success: #167653;
-    --shadow: 0 16px 44px rgba(29, 54, 95, .09);
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--background); color: var(--ink); font-family: "Pretendard", "Malgun Gothic", Arial, sans-serif; }
-  button, input, textarea, select { font: inherit; }
-  button { border: 0; cursor: pointer; transition: transform .15s ease, background .15s ease, box-shadow .15s ease; }
-  button:hover { transform: translateY(-1px); }
-  button:disabled { cursor: not-allowed; opacity: .55; transform: none; }
-  .hidden { display: none !important; }
-  .shell { width: min(1320px, calc(100% - 32px)); margin: 24px auto 48px; }
-  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); }
-  .muted { color: var(--muted); }
-  .small { font-size: 13px; }
-  .error { color: var(--danger); font-size: 13px; margin-top: 8px; }
-  .success { color: var(--success); font-size: 13px; margin-top: 8px; }
-  .primary { background: var(--navy); color: #fff; border-radius: 10px; padding: 10px 15px; font-weight: 700; }
-  .primary:hover { background: #13294a; }
-  .secondary { background: #edf2fb; color: var(--navy); border-radius: 10px; padding: 9px 13px; font-weight: 700; }
-  .danger { background: #fff0f2; color: var(--danger); border-radius: 10px; padding: 8px 11px; font-weight: 700; }
-  .icon-button { display: inline-grid; width: 42px; height: 42px; place-items: center; border-radius: 50%; background: #eef3ff; color: var(--blue); font-size: 18px; }
-
-  /* 로그인과 회원가입: 나중에 React 화면 컴포넌트로 그대로 분리할 영역 */
-  .auth-wrap { width: min(460px, 100%); margin: 8vh auto; padding: 32px; }
-  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
-  .brand-mark { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 13px; background: var(--navy); color: #fff; font-size: 21px; font-weight: 800; }
-  .brand h1 { margin: 0; font-size: 27px; letter-spacing: -.7px; }
-  .brand p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
-  .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 5px; background: #f2f5fa; border-radius: 11px; margin-bottom: 18px; }
-  .tabs button { background: transparent; color: var(--muted); padding: 9px; border-radius: 8px; font-weight: 700; }
-  .tabs button.active { background: #fff; color: var(--navy); box-shadow: 0 2px 8px rgba(0,0,0,.08); }
-  label { display: block; margin: 12px 0 6px; color: #465164; font-size: 13px; font-weight: 700; }
-  input, textarea, select { width: 100%; border: 1px solid #dce3ee; background: #fff; color: var(--ink); border-radius: 10px; padding: 11px 12px; outline: none; }
-  input:focus, textarea:focus, select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(61,110,234,.12); }
-  textarea { min-height: 120px; line-height: 1.55; resize: vertical; }
-  .auth-submit { width: 100%; margin-top: 18px; }
-
-  /* Dashboard */
-  .app-layout { display: grid; grid-template-columns: 238px minmax(0, 1fr); min-height: 760px; overflow: hidden; }
-  .sidebar { padding: 22px 16px; border-right: 1px solid var(--line); background: #fff; }
-  .profile { display: flex; align-items: center; gap: 10px; padding: 0 7px 21px; border-bottom: 1px solid var(--line); }
-  .avatar { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: #fff; background: linear-gradient(135deg, #3d6eea, #72a2ff); font-size: 14px; font-weight: 800; }
-  .profile-name { font-weight: 800; font-size: 14px; }
-  .profile-meta { margin-top: 2px; color: var(--muted); font-size: 12px; }
-  .nav { padding: 18px 3px; }
-  .nav-title { color: #98a2b3; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin: 12px 8px 8px; }
-  .nav-item { display: flex; align-items: center; gap: 9px; width: 100%; margin: 3px 0; padding: 10px 9px; border-radius: 9px; background: transparent; color: #526074; text-align: left; font-size: 13px; }
-  .nav-item.active, .nav-item:hover { background: #eef4ff; color: var(--blue); }
-  .sidebar-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; padding-top: 12px; border-top: 1px solid var(--line); }
-  .sidebar-actions button { padding: 10px 7px; background: #f6f8fc; border: 1px solid var(--line); border-radius: 9px; color: #465164; font-size: 12px; font-weight: 700; }
-  .sidebar-actions button.recording { color: #c3374b; border-color: #f8b9c3; background: #fff1f3; }
-  .main { padding: 28px; background: #fbfcff; }
-  .topbar { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
-  .page-title { flex: 1; }
-  .page-title h2 { margin: 0; font-size: 25px; letter-spacing: -.6px; }
-  .page-title p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
-  .status-badge { display: inline-flex; align-items: center; gap: 5px; padding: 7px 10px; border-radius: 999px; color: #176747; background: #e7f7ee; font-size: 12px; font-weight: 800; }
-  .status-badge.wait { background: #fff5db; color: #a06100; }
-  .dashboard-grid { display: grid; grid-template-columns: minmax(350px, 1.1fr) minmax(280px, .9fr); gap: 18px; }
-  .section-card { padding: 20px; }
-  .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
-  .section-head h3 { margin: 0; font-size: 16px; letter-spacing: -.25px; }
-  .section-head p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
-
-  /* Calendar */
-  .calendar-controls { display: flex; align-items: center; gap: 5px; }
-  .calendar-month { min-width: 92px; text-align: center; font-size: 14px; font-weight: 800; }
-  .mini-btn { width: 30px; height: 30px; border-radius: 8px; background: #f3f6fb; color: var(--muted); }
-  .calendar-week, .calendar-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
-  .calendar-week span { padding: 5px 0; text-align: center; color: #8b95a6; font-size: 11px; font-weight: 700; }
-  .calendar-days button { position: relative; min-height: 43px; padding: 3px; border-radius: 9px; background: transparent; color: #465164; font-size: 12px; text-align: center; }
-  .calendar-days button:hover { background: #eff5ff; }
-  .calendar-days button.today { color: #fff; background: var(--blue); font-weight: 800; }
-  .calendar-days button.has-event::after { content: ""; position: absolute; left: 50%; bottom: 5px; width: 4px; height: 4px; border-radius: 50%; background: #ff7f8b; transform: translateX(-50%); }
-  .calendar-days button.today.has-event::after { background: #fff; }
-  .calendar-days button.outside { color: #c6ccd6; }
-  .calendar-days button.selected { color: var(--blue); background: #eaf0ff; box-shadow: inset 0 0 0 2px var(--blue); font-weight: 800; }
-  .calendar-days button.today.selected { color: #fff; background: var(--blue); }
-
-  /* Upcoming events / meetings */
-  .event-list, .meeting-list { display: grid; gap: 9px; }
-  .event { display: flex; align-items: center; gap: 11px; padding: 12px; background: #f7f9fd; border: 1px solid #edf0f5; border-radius: 12px; }
-  .event-date { display: grid; width: 42px; min-height: 42px; place-content: center; border-radius: 10px; color: var(--blue); background: #eaf0ff; text-align: center; font-size: 11px; font-weight: 800; line-height: 1.25; }
-  .event-info { min-width: 0; flex: 1; }
-  .event-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 800; }
-  .event-meta { margin-top: 3px; color: var(--muted); font-size: 12px; }
-  .empty { display: grid; min-height: 155px; place-content: center; gap: 8px; color: var(--muted); text-align: center; font-size: 13px; }
-  .empty-icon { font-size: 30px; opacity: .55; }
-  .recent { grid-column: 1 / -1; }
-  .meeting { display: grid; grid-template-columns: 54px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 13px 0; border-bottom: 1px solid var(--line); }
-  .meeting:last-child { border-bottom: 0; }
-  .meeting-date { color: var(--muted); font-size: 12px; line-height: 1.45; }
-  .meeting-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 800; }
-  .meeting-summary { overflow: hidden; margin-top: 4px; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-  .meeting-actions { display: flex; gap: 5px; }
-  .meeting-actions button { padding: 7px 9px; background: #f0f4fa; border-radius: 8px; color: #4c5c74; font-size: 12px; font-weight: 700; }
-  .meeting-open { width: 100%; display: grid; grid-template-columns: 54px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 13px 0; border-bottom: 1px solid var(--line); background: transparent; color: inherit; text-align: left; }
-  .meeting-open:last-child { border-bottom: 0; }
-  .analysis-state { display: inline-flex; padding: 5px 8px; border-radius: 999px; background: #e7f7ee; color: var(--success); font-size: 11px; font-weight: 800; }
-  .analysis-state.wait { background: #fff5db; color: #a06100; }
-
-  /* Meeting detail view */
-  .detail-view { display: grid; gap: 18px; }
-  .detail-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .detail-toolbar .back { background: transparent; color: var(--navy); font-weight: 800; padding: 8px 0; }
-  .detail-card { padding: 24px; }
-  .detail-title-row { position: relative; display: flex; align-items: flex-start; gap: 12px; }
-  .detail-title-row h2 { flex: 1; margin: 0; font-size: 25px; letter-spacing: -.6px; }
-  .detail-menu { position: absolute; right: 0; top: 46px; z-index: 5; width: 170px; padding: 7px; border: 1px solid var(--line); border-radius: 11px; background: #fff; box-shadow: var(--shadow); }
-  .detail-menu button { width: 100%; padding: 9px; border-radius: 8px; background: transparent; color: #465164; text-align: left; }
-  .detail-menu button:hover { background: #f3f6fb; }
-  .detail-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 8px; color: var(--muted); font-size: 12px; }
-  .detail-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
-  .detail-section h3 { margin: 0 0 11px; font-size: 16px; }
-  .detail-summary { padding: 16px; border-radius: 12px; background: #f7f9fd; line-height: 1.7; white-space: pre-wrap; }
-  .detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-  .title-edit { display: flex; gap: 8px; margin-top: 14px; }
-  .title-edit input { flex: 1; }
-
-  /* Input and review areas */
-  .composer { grid-column: 1 / -1; padding: 20px; }
-  .composer-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
-  .composer-tabs button { padding: 8px 11px; border-radius: 8px; background: #f1f4f8; color: #5f6e83; font-size: 12px; font-weight: 800; }
-  .composer-tabs button.active { color: var(--blue); background: #eaf0ff; }
-  .composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
-  .record-state { color: var(--muted); font-size: 13px; }
-  .record-state.live { color: var(--danger); font-weight: 800; }
-  .review-card { margin-top: 18px; padding: 20px; }
-  .review-card h3 { margin: 0 0 5px; font-size: 16px; }
-  .review-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 11px; }
-  .result-card { margin-top: 18px; padding: 20px; }
-  .result-card pre { margin: 0; white-space: pre-wrap; font-family: inherit; line-height: 1.65; }
-  .qa-card { grid-column: 1 / -1; padding: 20px; }
-  .qa-form { display: flex; gap: 9px; }
-  .qa-form input { flex: 1; }
-  .qa-answer { margin-top: 15px; padding: 15px; background: #f7f9fd; border: 1px solid #e7edf5; border-radius: 12px; line-height: 1.65; white-space: pre-wrap; }
-  .qa-sources { display: grid; gap: 7px; margin-top: 12px; }
-  .qa-source { width: 100%; padding: 10px 12px; border: 1px solid #e1e8f2; border-radius: 10px; background: #fff; color: #4c5c74; text-align: left; font-size: 12px; }
-  table { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 12px; }
-  th, td { border: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
-  th { color: #526074; background: #f4f7fb; }
-
-  .admin { margin-top: 18px; padding: 20px; }
-  .admin-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
-  @media (max-width: 900px) { .app-layout { grid-template-columns: 1fr; } .sidebar { border-right: 0; border-bottom: 1px solid var(--line); } .nav { display: none; } .sidebar-actions { grid-template-columns: repeat(3, 1fr); } .dashboard-grid { grid-template-columns: 1fr; } }
-  @media (max-width: 540px) { .shell { width: calc(100% - 18px); margin-top: 9px; } .main { padding: 18px 14px; } .sidebar { padding: 15px; } .topbar { align-items: flex-start; } .topbar .secondary { display: none; } .meeting { grid-template-columns: 42px minmax(0, 1fr); } .meeting-actions { grid-column: 2; } }
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#f6f3ed" />
+  <meta name="description" content="Noting은 회의 대화를 결정과 실행 항목으로 정리하는 AI 회의 작업대입니다." />
+  <title>Noting — AI 회의 작업대</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="/ui/styles.css" />
 </head>
 <body>
-  <main class="shell">
-    <section id="auth-view" class="auth-wrap card">
-      <div class="brand">
-        <div class="brand-mark">N</div>
-        <div><h1>Noting</h1><p>안전한 회의록 자동화 서비스</p></div>
+  <div id="toast-region" class="toast-region" aria-live="polite"></div>
+
+  <main id="auth-view" class="auth-shell">
+    <section class="auth-story" aria-label="Noting 소개">
+      <div class="brand brand-light">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>Noting</span>
       </div>
-      <div class="tabs">
-        <button id="tab-login" class="active" type="button" onclick="showAuth('login')">로그인</button>
-        <button id="tab-signup" type="button" onclick="showAuth('signup')">회원가입</button>
+      <div class="auth-copy">
+        <p class="label-caps light-label">MEETING SIGNAL DESK</p>
+        <h1>대화 속 신호를<br />다음 행동으로.</h1>
+        <p>회의록을 안전하게 보관하고, AI가 결정과 업무를 찾아 팀의 기억으로 연결합니다.</p>
       </div>
-      <div id="login-pane">
-        <label for="login-username">아이디</label><input id="login-username" autocomplete="username" placeholder="아이디를 입력하세요" />
-        <label for="login-password">비밀번호</label><input id="login-password" type="password" autocomplete="current-password" placeholder="비밀번호를 입력하세요" />
-        <button class="primary auth-submit" type="button" onclick="login()">Noting 시작하기</button>
-        <p id="login-message" class="error"></p>
+      <div class="auth-signal" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
       </div>
-      <div id="signup-pane" class="hidden">
-        <label for="signup-username">아이디</label><input id="signup-username" placeholder="사용할 아이디" />
-        <label for="signup-password">비밀번호</label><input id="signup-password" type="password" placeholder="비밀번호" />
-        <label for="signup-department">부서</label>
-        <select id="signup-department"><option value="회계">회계</option><option value="경영">경영</option><option value="영업">영업</option></select>
-        <label for="signup-role">요청 역할</label>
-        <select id="signup-role"><option value="일반">일반</option><option value="관리자">관리자</option></select>
-        <button class="primary auth-submit" type="button" onclick="signup()">가입 승인 요청</button>
-        <p id="signup-message" class="error"></p>
-        <p class="muted small">가입 후 관리자 승인이 완료되어야 회의록 기능을 사용할 수 있습니다.</p>
-      </div>
+      <p class="auth-foot">부서별 접근 제어 · 개인정보 마스킹 · 근거 기반 RAG</p>
     </section>
 
-    <section id="app-view" class="app-layout card hidden">
-      <aside class="sidebar">
-        <div class="profile">
-          <div id="avatar" class="avatar">N</div>
-          <div><div id="profile-name" class="profile-name"></div><div id="profile-meta" class="profile-meta"></div></div>
+    <section class="auth-form-panel">
+      <div class="auth-card">
+        <div class="auth-mobile-brand">
+          <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>Noting</span></div>
         </div>
-        <nav class="nav">
-          <div class="nav-title">Workspace</div>
-          <button class="nav-item active" type="button" onclick="showDashboardAndScroll('dashboard-top')">⌂&nbsp; 대시보드</button>
-          <button class="nav-item" type="button" onclick="showDashboardAndScroll('qa-section')">✦&nbsp; 회의록 AI</button>
-          <button class="nav-item" type="button" onclick="showDashboardAndScroll('date-meetings-section')">▤&nbsp; 날짜별 회의</button>
-          <button class="nav-item" type="button" onclick="showDashboardAndScroll('composer-section')">＋&nbsp; 새 회의록</button>
-          <div id="admin-nav" class="hidden"><div class="nav-title">관리자</div><button class="nav-item" type="button" onclick="scrollToSection('admin-section')">✓&nbsp; 가입 승인</button></div>
-        </nav>
-        <div class="sidebar-actions">
-          <button id="sidebar-record" type="button" onclick="toggleRecording()">● 녹음</button>
-          <button type="button" onclick="chooseAudioFile()">♬ 음성 파일</button>
-          <button type="button" onclick="logout()">↪ 로그아웃</button>
-        </div>
-        <input id="audio-file" class="hidden" type="file" accept="audio/*" onchange="uploadSelectedAudio()" />
-      </aside>
-
-      <div class="main">
-        <header id="dashboard-top" class="topbar">
-          <div class="page-title"><h2>안녕하세요, <span id="greeting-name"></span>님</h2><p>회의와 해야 할 일을 한곳에서 정리하세요.</p></div>
-          <span id="approval-badge" class="status-badge">● 승인됨</span>
-          <button class="secondary" type="button" onclick="refreshDashboard()">↻ 새로고침</button>
-        </header>
-
-        <div id="pending-view" class="card section-card hidden">
-          <h3>관리자 승인을 기다리는 중입니다</h3>
-          <p class="muted">승인이 완료되면 회의록 저장, 음성 변환, 일정 확인 기능을 이용할 수 있습니다.</p>
+        <p class="label-caps">PRIVATE WORKSPACE</p>
+        <h2 id="auth-title">다시 만나서 반가워요.</h2>
+        <p id="auth-subtitle" class="auth-help">내 부서의 회의 작업대로 로그인하세요.</p>
+        <div class="auth-tabs" role="tablist">
+          <button id="tab-login" class="active" type="button" role="tab" onclick="showAuth('login')">로그인</button>
+          <button id="tab-signup" type="button" role="tab" onclick="showAuth('signup')">가입 요청</button>
         </div>
 
-        <div id="approved-view">
-          <div id="dashboard-view" class="dashboard-grid">
-            <section class="card section-card">
-              <div class="section-head"><div><h3>달력</h3><p>추출된 기한을 표시합니다.</p></div><div class="calendar-controls"><button class="mini-btn" type="button" onclick="changeMonth(-1)">‹</button><span id="calendar-month" class="calendar-month"></span><button class="mini-btn" type="button" onclick="changeMonth(1)">›</button></div></div>
-              <div class="calendar-week"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
-              <div id="calendar-days" class="calendar-days"></div>
-            </section>
+        <form id="login-pane" onsubmit="login(event)">
+          <label for="login-username">아이디</label>
+          <input id="login-username" autocomplete="username" placeholder="아이디를 입력하세요" required />
+          <label for="login-password">비밀번호</label>
+          <input id="login-password" type="password" autocomplete="current-password" placeholder="비밀번호를 입력하세요" required />
+          <button id="login-submit" class="button primary wide" type="submit">Noting 시작하기 <span>→</span></button>
+          <p id="login-message" class="form-message"></p>
+        </form>
 
-            <section class="card section-card">
-              <div class="section-head"><div><h3>다가오는 이벤트</h3><p>회의에서 추출한 기한 기준</p></div></div>
-              <div id="event-list" class="event-list"></div>
-            </section>
-
-            <section id="qa-section" class="card qa-card">
-              <div class="section-head"><div><h3>회의록 AI</h3><p>내 부서의 분석 완료 회의록을 근거로만 답합니다.</p></div></div>
-              <div class="qa-form"><input id="qa-question" placeholder="예: 지난 회의에서 배포 일정은 어떻게 정했어?" onkeydown="if (event.key === 'Enter') askMeetingAssistant()" /><button id="qa-submit" class="primary" type="button" onclick="askMeetingAssistant()">질문하기</button></div>
-              <div id="qa-result" class="hidden"></div>
-            </section>
-
-            <section id="date-meetings-section" class="card section-card recent">
-              <div class="section-head"><div><h3 id="selected-date-title">선택 날짜의 회의</h3><p>달력에서 날짜를 선택하면 해당 날짜에 등록된 회의가 표시됩니다.</p></div><button class="secondary" type="button" onclick="refreshDashboard()">목록 새로고침</button></div>
-              <div id="meeting-list" class="meeting-list"></div>
-            </section>
-
-            <section id="composer-section" class="card composer">
-              <div class="section-head"><div><h3>새 회의록</h3><p>텍스트를 입력하거나 녹음·음성 파일을 올리세요.</p></div></div>
-              <div class="composer-tabs"><button id="text-mode" class="active" type="button" onclick="setComposerMode('text')">텍스트 입력</button><button id="audio-mode" type="button" onclick="setComposerMode('audio')">음성 변환</button></div>
-              <div id="text-composer"><textarea id="new-content" placeholder="회의 내용을 붙여넣어 주세요."></textarea><div class="composer-footer"><span class="muted small">저장 시 개인정보가 마스킹된 뒤 부서별로 저장됩니다.</span><button class="primary" type="button" onclick="saveText()">저장 및 마스킹</button></div></div>
-              <div id="audio-composer" class="hidden"><div class="empty" style="min-height:130px"><div class="empty-icon">🎙</div><div id="record-message">녹음하거나 음성 파일을 업로드해 주세요.</div><div><button id="record-button" class="primary" type="button" onclick="toggleRecording()">● 녹음 시작</button> <button class="secondary" type="button" onclick="chooseAudioFile()">♬ 음성 파일 업로드</button></div></div></div>
-              <p id="new-message" class="error"></p>
-            </section>
+        <form id="signup-pane" class="hidden" onsubmit="signup(event)">
+          <label for="signup-username">아이디</label>
+          <input id="signup-username" autocomplete="username" placeholder="사용할 아이디를 입력하세요" required />
+          <label for="signup-password">비밀번호</label>
+          <input id="signup-password" type="password" autocomplete="new-password" placeholder="비밀번호를 입력하세요" required />
+          <div class="form-columns">
+            <div><label for="signup-department">부서</label><select id="signup-department"><option value="회계">회계</option><option value="경영">경영</option><option value="영업">영업</option></select></div>
+            <div><label for="signup-role">역할</label><select id="signup-role"><option value="일반">일반</option><option value="관리자">관리자</option></select></div>
           </div>
-
-          <section id="meeting-detail" class="detail-view hidden">
-            <div class="detail-toolbar"><button class="back" type="button" onclick="showDashboard()">← 대시보드로 돌아가기</button><span id="detail-analysis-state" class="analysis-state"></span></div>
-            <article class="card detail-card">
-              <div class="detail-title-row">
-                <h2 id="detail-title">회의록</h2>
-                <button class="icon-button" type="button" aria-label="회의 메뉴" onclick="toggleDetailMenu()">⋮</button>
-                <div id="detail-menu" class="detail-menu hidden"><button type="button" onclick="showTitleEditor()">제목 수정</button><button type="button" onclick="downloadPdf(currentTranscriptId)">PDF 보고서 다운로드</button></div>
-              </div>
-              <div id="detail-meta" class="detail-meta"></div>
-              <div id="title-edit" class="title-edit hidden"><input id="title-input" maxlength="80" /><button class="primary" type="button" onclick="saveTitle()">저장</button><button class="secondary" type="button" onclick="hideTitleEditor()">취소</button></div>
-              <section class="detail-section"><h3>핵심 요약</h3><div id="detail-summary" class="detail-summary"></div></section>
-              <section class="detail-section"><h3>업무 실행 계획</h3><div id="detail-tasks"></div></section>
-              <section id="detail-changes-section" class="detail-section hidden"><h3>일정 변경 후보</h3><div id="detail-changes" class="event-list"></div></section>
-              <section class="detail-section"><h3>회의록 내용</h3><p class="muted small">내용을 수정해 저장하면 개인정보를 다시 마스킹한 뒤 자동으로 재분석합니다.</p><textarea id="detail-content"></textarea><div class="detail-actions"><button id="detail-save" class="primary" type="button" onclick="saveDetailContent()">수정 내용 저장</button><button class="secondary" type="button" onclick="downloadPdf(currentTranscriptId)">PDF 보고서</button><button id="pii-button" class="secondary hidden" type="button" onclick="viewPii(currentTranscriptId)">개인정보 원본 보기</button></div></section>
-            </article>
-          </section>
-
-          <section id="result-card" class="card result-card hidden"><div class="section-head"><div><h3>분석 결과</h3><p id="result-subtitle"></p></div><button class="icon-button" type="button" onclick="hideResult()">×</button></div><div id="result-content"></div></section>
-
-          <section id="admin-section" class="card admin hidden"><div class="section-head"><div><h3>가입 승인 요청</h3><p>같은 부서의 요청만 처리할 수 있습니다.</p></div><button class="secondary" type="button" onclick="loadPending()">요청 새로고침</button></div><div id="pending-list"></div></section>
-        </div>
+          <button class="button primary wide" type="submit">가입 승인 요청 <span>→</span></button>
+          <p id="signup-message" class="form-message"></p>
+        </form>
       </div>
     </section>
   </main>
 
-<script>
-  let token = sessionStorage.getItem("noting_token");
-  let me = null;
-  let transcripts = [];
-  let dashboardTasks = [];
-  let calendarCursor = new Date();
-  let selectedCalendarDate = new Date();
-  let currentTranscriptId = null;
-  let recorder = { stream: null, context: null, source: null, processor: null, gain: null, chunks: [], startedAt: null, timer: null };
+  <div id="app-view" class="workspace hidden">
+    <div id="mobile-overlay" class="mobile-overlay hidden" onclick="toggleSidebar(false)"></div>
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-head">
+        <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>Noting</span></div>
+        <button class="icon-button mobile-only" type="button" aria-label="메뉴 닫기" onclick="toggleSidebar(false)">×</button>
+      </div>
+      <button class="button primary new-meeting" type="button" onclick="openComposer()"><span>＋</span> 새 회의 가져오기</button>
+      <nav class="main-nav" aria-label="주요 메뉴">
+        <p class="label-caps">WORKSPACE</p>
+        <button id="nav-dashboard" class="nav-item active" type="button" onclick="showDashboard()"><span>⌂</span> 회의 작업대</button>
+        <button type="button" class="nav-item" onclick="showDashboard('date-panel')"><span>▦</span> 모든 회의</button>
+        <button type="button" class="nav-item" onclick="showDashboard('task-panel')"><span>✓</span> 실행 항목 <b id="task-count" class="nav-count">0</b></button>
+        <button type="button" class="nav-item" onclick="showDashboard('qa-dashboard')"><span>✦</span> 회의록 AI</button>
+      </nav>
+      <section class="recent-nav">
+        <div class="nav-section-title"><p class="label-caps">RECENT SIGNALS</p><button type="button" aria-label="새로고침" onclick="refreshDashboard()">↻</button></div>
+        <div id="sidebar-meetings" class="sidebar-meetings"></div>
+      </section>
+      <div id="admin-nav" class="admin-nav hidden">
+        <p class="label-caps">ADMIN</p>
+        <button class="nav-item" type="button" onclick="openAdmin()"><span>♙</span> 가입 승인</button>
+      </div>
+      <footer class="profile">
+        <span id="avatar" class="avatar">N</span>
+        <span class="profile-copy"><b id="profile-name"></b><small id="profile-meta"></small></span>
+        <button class="icon-button" type="button" title="로그아웃" aria-label="로그아웃" onclick="logout()">↗</button>
+      </footer>
+    </aside>
 
-  function $(id) { return document.getElementById(id); }
-  function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, char => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "'":"&#39;", '"':"&quot;" })[char]); }
-  function showAuth(tab) { $("login-pane").classList.toggle("hidden", tab !== "login"); $("signup-pane").classList.toggle("hidden", tab !== "signup"); $("tab-login").classList.toggle("active", tab === "login"); $("tab-signup").classList.toggle("active", tab === "signup"); }
-  function scrollToSection(id) { $(id).scrollIntoView({ behavior: "smooth", block: "start" }); }
-  function showDashboardAndScroll(id) { showDashboard(); scrollToSection(id); }
-  function setMessage(id, message, type = "error") { const el = $(id); el.textContent = message; el.className = type; }
-  function setComposerMode(mode) { $("text-composer").classList.toggle("hidden", mode !== "text"); $("audio-composer").classList.toggle("hidden", mode !== "audio"); $("text-mode").classList.toggle("active", mode === "text"); $("audio-mode").classList.toggle("active", mode === "audio"); }
+    <section class="workbench">
+      <header class="topbar">
+        <button class="icon-button mobile-only" type="button" aria-label="메뉴 열기" onclick="toggleSidebar(true)">☰</button>
+        <div>
+          <p class="label-caps">MEETING INTELLIGENCE</p>
+          <span id="workspace-caption">내 부서의 신호 작업대</span>
+        </div>
+        <div class="top-actions">
+          <span id="approval-badge" class="status-pill">승인됨</span>
+          <button class="button ghost" type="button" onclick="focusAssistant()">⌕ 회의 검색</button>
+          <button class="button primary compact" type="button" onclick="openComposer()">＋ 새 회의</button>
+        </div>
+      </header>
 
-  async function api(path, options = {}) {
-    const headers = { ...(options.headers || {}) };
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const response = await fetch(path, { ...options, headers });
-    if (!response.ok) { let detail = response.statusText; try { detail = (await response.json()).detail || detail; } catch (_) {} throw new Error(detail); }
-    return response;
-  }
+      <div id="pending-view" class="pending-panel hidden">
+        <span class="pending-icon">⌛</span>
+        <p class="label-caps">APPROVAL PENDING</p>
+        <h2>워크스페이스 승인을 기다리고 있어요.</h2>
+        <p>같은 부서 관리자가 승인하면 회의록과 AI 검색 기능이 열립니다.</p>
+      </div>
 
-  async function login() {
-    setMessage("login-message", "");
-    const body = new URLSearchParams({ username: $("login-username").value, password: $("login-password").value });
-    try { const response = await fetch("/auth/login", { method: "POST", body }); if (!response.ok) throw new Error("아이디 또는 비밀번호를 확인해 주세요."); token = (await response.json()).access_token; sessionStorage.setItem("noting_token", token); await loadMe(); } catch (error) { setMessage("login-message", error.message); }
-  }
+      <div id="approved-view" class="content">
+        <section id="dashboard-view">
+          <div class="dashboard-intro">
+            <div>
+              <p class="eyebrow"><span></span> LIVE WORKSPACE</p>
+              <h1><span id="greeting-name"></span>님의<br /><em>회의 신호</em>를 정리했어요.</h1>
+              <p>날짜를 고르면 회의와 실행 항목이 함께 연결됩니다.</p>
+            </div>
+            <div class="signal-meter" aria-label="회의 분석 현황">
+              <div><span id="meeting-total">0</span><small>전체 회의</small></div>
+              <i></i>
+              <div><span id="analysis-total">0</span><small>분석 완료</small></div>
+              <i></i>
+              <div><span id="active-task-total">0</span><small>진행 업무</small></div>
+            </div>
+          </div>
 
-  async function signup() {
-    const payload = { username: $("signup-username").value, password: $("signup-password").value, department: $("signup-department").value, role: $("signup-role").value };
-    try { await api("/auth/signup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); setMessage("signup-message", "가입 요청이 완료되었습니다. 승인 후 로그인해 주세요.", "success"); } catch (error) { setMessage("signup-message", error.message); }
-  }
+          <div class="dashboard-grid">
+            <section id="calendar-panel" class="paper-panel calendar-panel">
+              <div class="panel-head">
+                <div><p class="label-caps">DATE SIGNAL</p><h2>회의 캘린더</h2></div>
+                <div class="calendar-controls"><button type="button" onclick="changeMonth(-1)">←</button><strong id="calendar-month"></strong><button type="button" onclick="changeMonth(1)">→</button></div>
+              </div>
+              <div class="calendar-week"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
+              <div id="calendar-days" class="calendar-days"></div>
+              <div class="calendar-legend"><span><i class="teal"></i> 회의</span><span><i class="apricot"></i> 마감 업무</span></div>
+            </section>
 
-  async function loadMe() {
-    me = await (await api("/me")).json();
-    $("auth-view").classList.add("hidden"); $("app-view").classList.remove("hidden");
-    $("profile-name").textContent = me.username; $("profile-meta").textContent = `${me.department} · ${me.role}`; $("greeting-name").textContent = me.username; $("avatar").textContent = me.username.slice(0, 1).toUpperCase();
-    const approved = me.status === "승인";
-    $("pending-view").classList.toggle("hidden", approved); $("approved-view").classList.toggle("hidden", !approved);
-    $("approval-badge").textContent = approved ? "● 승인됨" : "● 승인 대기"; $("approval-badge").classList.toggle("wait", !approved);
-    const isAdmin = approved && me.role === "관리자"; $("admin-section").classList.toggle("hidden", !isAdmin); $("admin-nav").classList.toggle("hidden", !isAdmin); $("pii-button").classList.toggle("hidden", !isAdmin);
-    if (approved) await refreshDashboard();
-  }
+            <section id="task-panel" class="action-rail">
+              <div class="panel-head">
+                <div><p class="label-caps teal-text">NEXT SCENE</p><h2>다가오는 실행 항목</h2></div>
+                <span id="task-progress" class="progress-pill">0개</span>
+              </div>
+              <div id="event-list" class="event-list"></div>
+            </section>
 
-  function logout() { sessionStorage.removeItem("noting_token"); token = null; me = null; transcripts = []; dashboardTasks = []; hideResult(); $("app-view").classList.add("hidden"); $("auth-view").classList.remove("hidden"); }
+            <section id="date-panel" class="paper-panel date-panel">
+              <div class="panel-head">
+                <div><p class="label-caps">SELECTED DAY</p><h2 id="selected-date-title">선택 날짜의 회의</h2></div>
+                <button class="button ghost compact" type="button" onclick="openComposer()">＋ 이 날짜에 추가</button>
+              </div>
+              <div id="meeting-list" class="meeting-list"></div>
+            </section>
 
-  async function refreshDashboard() {
-    try {
-      transcripts = await (await api("/transcripts")).json();
-      transcripts.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0) || b.id - a.id);
-      const taskResults = await Promise.all(transcripts.map(async transcript => { try { return { transcript, data: await (await api(`/transcripts/${transcript.id}/tasks`)).json() }; } catch (_) { return { transcript, data: { tasks: [] } }; } }));
-      dashboardTasks = taskResults.flatMap(({ transcript, data }) => (data.tasks || []).map(task => ({ ...task, transcriptId: transcript.id, transcriptText: transcript.masked_content })));
-      renderCalendar(); renderEvents(); renderDateMeetings();
-    } catch (error) { showResult("목록을 불러오지 못했습니다", `<p class="error">${escapeHtml(error.message)}</p>`); }
-  }
+            <section id="qa-dashboard" class="assistant-panel">
+              <div class="assistant-heading">
+                <span class="assistant-orb">✦</span>
+                <div><p class="label-caps teal-text">GROUNDED AI</p><h2>회의록 AI에게 물어보세요</h2><p>내 부서의 분석된 회의록 근거로만 답합니다.</p></div>
+              </div>
+              <div id="qa-dashboard-messages" class="chat-messages">
+                <div class="chat-bubble ai">지난 회의의 결정, 일정, 담당 업무를 찾아드릴게요. 무엇이 궁금한가요?</div>
+              </div>
+              <form class="chat-form" onsubmit="askMeetingAssistant(event, 'dashboard')">
+                <input id="qa-dashboard-input" placeholder="예: 지난 회의에서 배포 일정은 어떻게 정했어?" autocomplete="off" />
+                <button id="qa-dashboard-submit" type="submit" aria-label="질문 보내기">↑</button>
+              </form>
+              <div class="question-chips"><button type="button" onclick="askSuggested('배포 일정은 어떻게 정했어?', 'dashboard')">배포 일정</button><button type="button" onclick="askSuggested('내가 맡은 업무를 알려줘', 'dashboard')">담당 업무</button><button type="button" onclick="askSuggested('아직 정해지지 않은 내용은 뭐야?', 'dashboard')">미결 사항</button></div>
+            </section>
+          </div>
+        </section>
 
-  function parseDue(value) {
-    if (!value) return null;
-    const text = String(value).trim(); let match = text.match(/(20\d{2})[.\-/년\s]+(\d{1,2})[.\-/월\s]+(\d{1,2})/);
-    if (match) return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-    match = text.match(/(\d{1,2})월\s*(\d{1,2})일?/); if (match) return new Date(new Date().getFullYear(), Number(match[1]) - 1, Number(match[2]));
-    return null;
-  }
-  function dateKey(date) { return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`; }
-  function formatShortDate(date) { return `${date.getMonth() + 1}/${date.getDate()}`; }
-  function formatCreated(value) { if (!value) return "최근"; const date = new Date(value); return Number.isNaN(date.getTime()) ? "최근" : `${date.getMonth() + 1}.${date.getDate()}`; }
-  function isActiveTask(task) { return task.status !== "완료" && task.status !== "변경됨"; }
+        <section id="meeting-detail" class="detail-view hidden">
+          <div class="detail-toolbar">
+            <button class="back-button" type="button" onclick="showDashboard()">← 회의 작업대로</button>
+            <div><span id="detail-analysis-state" class="status-pill processing">분석 확인 중</span><button class="icon-button" type="button" aria-label="회의 메뉴" onclick="toggleDetailMenu()">⋮</button></div>
+            <div id="detail-menu" class="popover hidden"><button type="button" onclick="showTitleEditor()">제목 수정</button><button type="button" onclick="downloadPdf(currentTranscriptId)">PDF 보고서</button><button id="pii-button" class="hidden" type="button" onclick="viewPii(currentTranscriptId)">개인정보 원본</button></div>
+          </div>
 
-  function changeMonth(direction) {
-    calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + direction, 1);
-    selectedCalendarDate = new Date(calendarCursor);
-    renderCalendar();
-    renderDateMeetings();
-  }
-  function selectCalendarDate(year, month, day) {
-    selectedCalendarDate = new Date(year, month, day);
-    calendarCursor = new Date(year, month, 1);
-    renderCalendar();
-    renderDateMeetings();
-    $("date-meetings-section").scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-  function renderCalendar() {
-    $("calendar-month").textContent = `${calendarCursor.getFullYear()}년 ${calendarCursor.getMonth() + 1}월`;
-    const first = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth(), 1); const start = new Date(first); start.setDate(1 - first.getDay());
-    const eventDates = new Set(dashboardTasks.filter(isActiveTask).map(task => parseDue(task.due)).filter(Boolean).map(dateKey));
-    const meetingDates = new Set(transcripts.map(item => new Date(item.created_at)).filter(date => !Number.isNaN(date.getTime())).map(dateKey));
-    const today = new Date(); let html = "";
-    for (let index = 0; index < 42; index += 1) {
-      const day = new Date(start); day.setDate(start.getDate() + index);
-      const hasContent = eventDates.has(dateKey(day)) || meetingDates.has(dateKey(day));
-      const classes = [day.getMonth() !== calendarCursor.getMonth() ? "outside" : "", dateKey(day) === dateKey(today) ? "today" : "", dateKey(day) === dateKey(selectedCalendarDate) ? "selected" : "", hasContent ? "has-event" : ""].filter(Boolean).join(" ");
-      html += `<button type="button" class="${classes}" onclick="selectCalendarDate(${day.getFullYear()}, ${day.getMonth()}, ${day.getDate()})" title="${hasContent ? "회의 또는 일정 있음" : ""}">${day.getDate()}</button>`;
-    }
-    $("calendar-days").innerHTML = html;
-  }
+          <header class="detail-header">
+            <p class="eyebrow"><span></span> MEETING RECORD</p>
+            <div class="detail-title-line"><h1 id="detail-title">회의록을 불러오는 중입니다.</h1></div>
+            <div id="detail-meta" class="detail-meta"></div>
+            <div id="title-edit" class="title-editor hidden"><input id="title-input" maxlength="80" /><button class="button primary compact" type="button" onclick="saveTitle()">저장</button><button class="button ghost compact" type="button" onclick="hideTitleEditor()">취소</button></div>
+          </header>
 
-  function renderEvents() {
-    const now = new Date(); now.setHours(0, 0, 0, 0);
-    const upcoming = dashboardTasks.filter(isActiveTask).map(task => ({ ...task, date: parseDue(task.due) })).filter(item => item.date && item.date >= now).sort((a, b) => a.date - b.date).slice(0, 5);
-    const box = $("event-list");
-    if (!upcoming.length) { box.innerHTML = '<div class="empty"><div class="empty-icon">◌</div><div>다가오는 이벤트가 없습니다.</div><div class="small">회의록을 분석하면 기한이 이곳에 표시됩니다.</div></div>'; return; }
-    box.innerHTML = upcoming.map(item => `<button type="button" class="event" onclick="openTranscript(${item.transcriptId})"><span class="event-date">${item.date.getMonth() + 1}월<br>${item.date.getDate()}일</span><span class="event-info"><span class="event-name">${escapeHtml(item.task || "업무 일정")}</span><span class="event-meta">담당 ${escapeHtml(item.assignee || "미지정")} · ${escapeHtml(item.due)}</span></span><span class="muted">›</span></button>`).join("");
-  }
+          <div class="detail-grid">
+            <article class="transcript-desk paper-panel">
+              <div class="panel-head">
+                <div><p class="label-caps">FULL TRANSCRIPT</p><h2>회의 내용</h2></div>
+                <span class="masked-pill">개인정보 마스킹됨</span>
+              </div>
+              <p class="panel-description">긴 회의 내용을 가장 넓은 영역에서 읽고 바로 수정할 수 있습니다.</p>
+              <textarea id="detail-content" aria-label="회의록 내용"></textarea>
+              <div class="transcript-actions"><span id="detail-save-note">수정하면 기존 분석을 새 내용으로 다시 생성합니다.</span><button id="detail-save" class="button primary" type="button" onclick="saveDetailContent()">수정 내용 저장</button></div>
+            </article>
 
-  function renderDateMeetings() {
-    const box = $("meeting-list");
-    $("selected-date-title").textContent = `${selectedCalendarDate.getFullYear()}년 ${selectedCalendarDate.getMonth() + 1}월 ${selectedCalendarDate.getDate()}일 회의`;
-    const selected = transcripts.filter(transcript => {
-      const created = new Date(transcript.created_at);
-      return !Number.isNaN(created.getTime()) && dateKey(created) === dateKey(selectedCalendarDate);
-    });
-    if (!selected.length) { box.innerHTML = '<div class="empty"><div class="empty-icon">▤</div><div><b>선택한 날짜에 등록된 회의가 없습니다.</b></div><div class="small">다른 날짜를 선택하거나 새 회의록을 만들어 보세요.</div></div>'; return; }
-    box.innerHTML = selected.map(transcript => `<button type="button" class="meeting-open" onclick="openTranscript(${transcript.id})"><span class="meeting-date">${formatCreated(transcript.created_at)}<br>${escapeHtml(transcript.department)}</span><span><span class="meeting-title">${escapeHtml(transcript.title || `회의록 #${transcript.id}`)}</span><span class="meeting-summary">${escapeHtml(transcript.summary || transcript.masked_content)}</span></span><span class="analysis-state ${transcript.summary ? "" : "wait"}">${transcript.summary ? "분석 완료" : "분석 중"}</span></button>`).join("");
-  }
+            <aside class="detail-side">
+              <section class="summary-panel paper-panel">
+                <div class="panel-head">
+                  <div><p class="label-caps teal-text">AI SIGNAL</p><h2>핵심 요약</h2></div>
+                  <span class="summary-spark">✦</span>
+                </div>
+                <div id="detail-summary" class="detail-summary"><span class="muted">분석 결과를 확인하고 있습니다.</span></div>
+                <div class="signal-caption-strip"><span>근거 연결</span><i></i><i class="active"></i><i></i><i></i><span>RAG READY</span></div>
+              </section>
 
-  async function saveText() {
-    const content = $("new-content").value.trim(); if (!content) { setMessage("new-message", "회의 내용을 입력해 주세요."); return; }
-    try {
-      setMessage("new-message", "회의록을 저장하고 AI가 자동으로 분석하고 있습니다.", "success");
-      const data = await (await api("/transcripts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }) })).json();
-      $("new-content").value = "";
-      selectedCalendarDate = new Date(data.created_at || Date.now());
-      calendarCursor = new Date(selectedCalendarDate.getFullYear(), selectedCalendarDate.getMonth(), 1);
-      await autoAnalyzeTranscript(data.id, true);
-    } catch (error) { setMessage("new-message", error.message); }
-  }
+              <section class="task-card action-rail">
+                <div class="panel-head">
+                  <div><p class="label-caps teal-text">ACTION ITEMS</p><h2>업무 실행 계획</h2></div>
+                  <span id="detail-task-count" class="progress-pill">0개</span>
+                </div>
+                <div id="detail-tasks" class="detail-tasks"></div>
+                <div id="detail-changes-section" class="schedule-changes hidden"><p class="label-caps">SCHEDULE CHANGES</p><div id="detail-changes"></div></div>
+              </section>
 
-  function chooseAudioFile() { $("audio-file").click(); }
-  async function uploadSelectedAudio() { const file = $("audio-file").files[0]; if (!file) return; await uploadAudio(file); $("audio-file").value = ""; }
-  async function uploadAudio(file) {
-    setComposerMode("audio"); setMessage("new-message", "음성을 텍스트로 변환하는 중입니다. 파일 길이에 따라 시간이 걸릴 수 있습니다.", "success");
-    const data = new FormData(); data.append("file", file, file.name);
-    try {
-      const transcript = await (await api("/transcripts/upload", { method: "POST", body: data })).json();
-      setMessage("new-message", "음성 변환이 완료되어 AI가 자동으로 분석하고 있습니다.", "success");
-      selectedCalendarDate = new Date(transcript.created_at || Date.now());
-      calendarCursor = new Date(selectedCalendarDate.getFullYear(), selectedCalendarDate.getMonth(), 1);
-      await autoAnalyzeTranscript(transcript.id, true);
-    } catch (error) { setMessage("new-message", error.message); }
-  }
+              <section id="qa-detail" class="assistant-panel compact-assistant">
+                <div class="assistant-heading">
+                  <span class="assistant-orb">✦</span>
+                  <div><p class="label-caps teal-text">MEETING AI</p><h2>회의록 AI</h2><p>저장된 회의 근거를 함께 확인하세요.</p></div>
+                </div>
+                <div id="qa-detail-messages" class="chat-messages compact-chat"><div class="chat-bubble ai">이 회의와 이전 회의의 맥락을 연결해 질문할 수 있어요.</div></div>
+                <form class="chat-form" onsubmit="askMeetingAssistant(event, 'detail')"><input id="qa-detail-input" placeholder="회의 내용에서 필요한 것을 검색하세요" autocomplete="off" /><button id="qa-detail-submit" type="submit" aria-label="질문 보내기">↑</button></form>
+              </section>
+            </aside>
+          </div>
+        </section>
+      </div>
+    </section>
+  </div>
 
-  async function toggleRecording() { if (recorder.stream) await stopRecording(); else await startRecording(); }
-  async function startRecording() {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setComposerMode("audio");
-      setMessage("new-message", "브라우저 보안 정책상 IP 주소의 HTTP 접속에서는 마이크 녹음을 사용할 수 없습니다. HTTPS로 접속하거나 음성 파일 업로드를 이용해 주세요.");
-      return;
-    }
-    try {
-      recorder.stream = await navigator.mediaDevices.getUserMedia({ audio: true }); recorder.context = new AudioContext(); recorder.source = recorder.context.createMediaStreamSource(recorder.stream); recorder.processor = recorder.context.createScriptProcessor(4096, 1, 1); recorder.gain = recorder.context.createGain(); recorder.gain.gain.value = 0; recorder.chunks = [];
-      recorder.processor.onaudioprocess = event => recorder.chunks.push(new Float32Array(event.inputBuffer.getChannelData(0))); recorder.source.connect(recorder.processor); recorder.processor.connect(recorder.gain); recorder.gain.connect(recorder.context.destination); recorder.startedAt = Date.now(); recorder.timer = setInterval(updateRecordingUi, 500); updateRecordingUi();
-    } catch (error) { setMessage("new-message", "마이크 권한을 허용해 주세요: " + error.message); }
-  }
-  function updateRecordingUi() { const seconds = Math.floor((Date.now() - recorder.startedAt) / 1000); const label = `● 녹음 중 ${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")} · 다시 누르면 저장`; $("record-message").textContent = label; $("record-message").className = "record-state live"; $("record-button").textContent = "■ 녹음 종료 및 변환"; $("sidebar-record").textContent = "■ 녹음 종료"; $("sidebar-record").classList.add("recording"); }
-  async function stopRecording() {
-    clearInterval(recorder.timer); recorder.processor.disconnect(); recorder.source.disconnect(); recorder.gain.disconnect(); recorder.stream.getTracks().forEach(track => track.stop()); const rate = recorder.context.sampleRate; await recorder.context.close(); const blob = encodeWav(recorder.chunks, rate); recorder = { stream: null, context: null, source: null, processor: null, gain: null, chunks: [], startedAt: null, timer: null }; $("record-message").textContent = "녹음 파일을 변환하는 중입니다."; $("record-message").className = "record-state"; $("record-button").textContent = "● 녹음 시작"; $("sidebar-record").textContent = "● 녹음"; $("sidebar-record").classList.remove("recording"); await uploadAudio(new File([blob], `noting-record-${Date.now()}.wav`, { type: "audio/wav" }));
-  }
-  function encodeWav(chunks, sampleRate) { const length = chunks.reduce((total, chunk) => total + chunk.length, 0); const buffer = new ArrayBuffer(44 + length * 2); const view = new DataView(buffer); const write = (offset, text) => { for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i)); }; write(0, "RIFF"); view.setUint32(4, 36 + length * 2, true); write(8, "WAVE"); write(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true); write(36, "data"); view.setUint32(40, length * 2, true); let offset = 44; chunks.forEach(chunk => chunk.forEach(sample => { const value = Math.max(-1, Math.min(1, sample)); view.setInt16(offset, value < 0 ? value * 0x8000 : value * 0x7fff, true); offset += 2; })); return new Blob([buffer], { type: "audio/wav" }); }
+  <div id="composer-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="composer-title">
+    <div class="modal-backdrop" onclick="closeComposer()"></div>
+    <section class="modal-card paper-panel">
+      <div class="modal-head"><div><p class="label-caps">NEW MEETING SIGNAL</p><h2 id="composer-title">새 회의 가져오기</h2></div><button class="icon-button" type="button" aria-label="닫기" onclick="closeComposer()">×</button></div>
+      <div class="composer-tabs"><button id="text-mode" class="active" type="button" onclick="setComposerMode('text')">텍스트 입력</button><button id="audio-mode" type="button" onclick="setComposerMode('audio')">음성 변환</button></div>
+      <div id="text-composer"><label for="new-content">회의 내용</label><textarea id="new-content" placeholder="회의 내용을 붙여넣어 주세요. 저장 즉시 마스킹되고 자동 분석이 시작됩니다."></textarea><button id="text-save-button" class="button primary wide" type="button" onclick="saveText()">저장하고 자동 분석 시작</button></div>
+      <div id="audio-composer" class="hidden">
+        <div class="audio-drop">
+          <span class="audio-icon">◉</span><h3 id="record-message">녹음하거나 음성 파일을 올려주세요.</h3>
+          <p>WAV, MP3, M4A 등 · 최대 25MB</p>
+          <div><button id="record-button" class="button primary" type="button" onclick="toggleRecording()">● 녹음 시작</button><button class="button ghost" type="button" onclick="chooseAudioFile()">♬ 파일 선택</button></div>
+        </div>
+      </div>
+      <input id="audio-file" class="hidden" type="file" accept="audio/*" onchange="uploadSelectedAudio()" />
+      <p id="new-message" class="form-message"></p>
+      <p class="privacy-note">⌁ 개인정보는 저장 전에 자동으로 마스킹되며 같은 부서 사용자만 접근할 수 있습니다.</p>
+    </section>
+  </div>
 
-  function showDashboard() {
-    $("meeting-detail").classList.add("hidden");
-    $("dashboard-view").classList.remove("hidden");
-    const isAdmin = me?.status === "승인" && me?.role === "관리자";
-    $("admin-section").classList.toggle("hidden", !isAdmin);
-    $("detail-menu").classList.add("hidden");
-    hideTitleEditor();
-  }
-  async function openTranscript(id) {
-    currentTranscriptId = id;
-    $("dashboard-view").classList.add("hidden");
-    $("admin-section").classList.add("hidden");
-    hideResult();
-    $("meeting-detail").classList.remove("hidden");
-    $("detail-title").textContent = "회의록을 불러오는 중입니다.";
-    $("detail-meta").textContent = "";
-    $("detail-summary").innerHTML = '<span class="muted">저장된 분석 결과를 확인하고 있습니다.</span>';
-    $("detail-tasks").innerHTML = "";
-    $("detail-content").value = "";
-    $("meeting-detail").scrollIntoView({ behavior: "smooth", block: "start" });
-    try {
-      const data = await (await api(`/transcripts/${id}/tasks`)).json();
-      const scheduleData = data.summary ? await (await api(`/transcripts/${id}/schedule-change-candidates`)).json() : { change_candidates: [] };
-      renderMeetingDetail(data, scheduleData);
-    } catch (error) {
-      $("detail-title").textContent = `회의록 #${id}`;
-      $("detail-summary").innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
-    }
-  }
-  function renderMeetingDetail(data, scheduleData = { change_candidates: [] }) {
-    const created = data.created_at ? new Date(data.created_at) : null;
-    $("detail-title").textContent = data.title || `회의록 #${data.id}`;
-    $("title-input").value = data.title || `회의록 #${data.id}`;
-    $("detail-meta").innerHTML = `<span>회의록 #${data.id}</span><span>${escapeHtml(data.department || me?.department || "")}</span><span>${created && !Number.isNaN(created.getTime()) ? created.toLocaleString("ko-KR") : "등록일 미확인"}</span><span>${data.title_is_manual ? "사용자 수정 제목" : "AI 자동 제목"}</span>`;
-    $("detail-analysis-state").textContent = data.summary ? "분석 완료" : "자동 분석 필요";
-    $("detail-analysis-state").classList.toggle("wait", !data.summary);
-    $("detail-summary").innerHTML = data.summary ? escapeHtml(data.summary) : `<span class="muted">자동 분석 결과가 아직 없습니다.</span> <button class="secondary" type="button" onclick="autoAnalyzeTranscript(${data.id}, true)">다시 시도</button>`;
-    $("detail-content").value = data.masked_content || "";
-    const rows = (data.tasks || []).map(task => `<tr><td>${escapeHtml(task.task || "-")}</td><td>${escapeHtml(task.assignee || "-")}</td><td>${escapeHtml(task.due || "-")}</td><td>${escapeHtml(task.request || "-")}</td><td id="task-status-${task.id}">${escapeHtml(task.status || "대기")}</td><td><button class="secondary" type="button" onclick="updateTaskStatus(${data.id}, ${task.id}, '대기')">대기</button> <button class="secondary" type="button" onclick="updateTaskStatus(${data.id}, ${task.id}, '진행중')">진행</button> <button class="secondary" type="button" onclick="updateTaskStatus(${data.id}, ${task.id}, '완료')">완료</button></td></tr>`).join("");
-    $("detail-tasks").innerHTML = rows ? `<table><tr><th>할 일</th><th>담당자</th><th>기한</th><th>요청사항</th><th>상태</th><th>상태 변경</th></tr>${rows}</table>` : '<div class="empty" style="min-height:90px">추출된 업무가 없습니다.</div>';
-    const changes = (scheduleData.change_candidates || []).map(change => `<div class="event"><span class="event-info"><span class="event-name">${escapeHtml(change.task.task)}</span><span class="event-meta">${escapeHtml(change.previous_task.due)} → ${escapeHtml(change.task.due)} · 유사도 ${change.similarity}</span></span><button class="secondary" type="button" onclick="confirmScheduleChange(${data.id}, ${change.task.id}, ${change.previous_task.id})">일정 변경 확인</button></div>`).join("");
-    $("detail-changes-section").classList.toggle("hidden", !changes);
-    $("detail-changes").innerHTML = changes;
-  }
-  async function autoAnalyzeTranscript(id, openAfter = false) {
-    currentTranscriptId = id;
-    if (openAfter) {
-      $("dashboard-view").classList.add("hidden");
-      $("meeting-detail").classList.remove("hidden");
-      $("detail-title").textContent = "AI가 회의 제목을 정하고 있습니다.";
-      $("detail-analysis-state").textContent = "자동 분석 중";
-      $("detail-analysis-state").classList.add("wait");
-      $("detail-summary").innerHTML = '<span class="muted">요약·업무·검색 임베딩을 자동으로 생성하고 있습니다.</span>';
-    }
-    try {
-      await api(`/transcripts/${id}/analysis`, { method: "POST" });
-      setMessage("new-message", "회의록 저장과 자동 분석이 완료되었습니다.", "success");
-      await refreshDashboard();
-      if (openAfter) await openTranscript(id);
-    } catch (error) {
-      await refreshDashboard();
-      if (openAfter) {
-        await openTranscript(id);
-        $("detail-summary").innerHTML = `<p class="error">자동 분석에 실패했습니다: ${escapeHtml(error.message)}</p><button class="secondary" type="button" onclick="autoAnalyzeTranscript(${id}, true)">자동 분석 다시 시도</button>`;
-      }
-      setMessage("new-message", `회의록은 저장됐지만 자동 분석에 실패했습니다: ${error.message}`);
-    }
-  }
-  async function saveDetailContent() {
-    if (!currentTranscriptId) return;
-    const button = $("detail-save");
-    button.disabled = true;
-    button.textContent = "저장 중...";
-    try {
-      const data = await (await api(`/transcripts/${currentTranscriptId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: $("detail-content").value }) })).json();
-      $("detail-content").value = data.masked_content;
-      await autoAnalyzeTranscript(currentTranscriptId, true);
-    } catch (error) {
-      $("detail-summary").innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
-    } finally {
-      button.disabled = false;
-      button.textContent = "수정 내용 저장";
-    }
-  }
-  function toggleDetailMenu() { $("detail-menu").classList.toggle("hidden"); }
-  function showTitleEditor() { $("detail-menu").classList.add("hidden"); $("title-edit").classList.remove("hidden"); $("title-input").focus(); }
-  function hideTitleEditor() { $("title-edit").classList.add("hidden"); }
-  async function saveTitle() {
-    const title = $("title-input").value.trim();
-    if (!currentTranscriptId || !title) return;
-    try {
-      const data = await (await api(`/transcripts/${currentTranscriptId}/title`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title }) })).json();
-      $("detail-title").textContent = data.title;
-      hideTitleEditor();
-      await refreshDashboard();
-      await openTranscript(currentTranscriptId);
-    } catch (error) { $("detail-summary").innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`; }
-  }
-  async function confirmScheduleChange(transcriptId, taskId, previousTaskId) {
-    try {
-      await api(`/transcripts/${transcriptId}/tasks/${taskId}/schedule-changes/${previousTaskId}/confirm`, { method: "POST" });
-      await refreshDashboard();
-      await openTranscript(transcriptId);
-    } catch (error) {
-      $("detail-changes").innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
-    }
-  }
-  async function updateTaskStatus(transcriptId, taskId, status) {
-    try {
-      const result = await (await api(`/transcripts/${transcriptId}/tasks/${taskId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) })).json();
-      const cell = $(`task-status-${taskId}`);
-      if (cell) cell.textContent = result.status;
-      await refreshDashboard();
-      await openTranscript(transcriptId);
-    } catch (error) {
-      $("detail-tasks").innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
-    }
-  }
-  async function askMeetingAssistant() {
-    const question = $("qa-question").value.trim(); if (!question) return;
-    const button = $("qa-submit"); const box = $("qa-result"); button.disabled = true; button.textContent = "검색 중..."; box.classList.remove("hidden"); box.innerHTML = '<div class="qa-answer muted">관련 회의록을 찾고 있습니다.</div>';
-    try {
-      const data = await (await api("/transcripts/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question }) })).json();
-      const sources = (data.sources || []).map(source => `<button type="button" class="qa-source" onclick="openTranscript(${source.id})">회의록 #${source.id}${source.chunk_index === null || source.chunk_index === undefined ? "" : ` · 본문 조각 ${source.chunk_index + 1}`} · 유사도 ${source.similarity} · ${escapeHtml(source.content || source.summary || "근거 없음")}</button>`).join("");
-      box.innerHTML = `<div class="qa-answer">${escapeHtml(data.answer)}</div>${sources ? `<div class="qa-sources"><b class="small">답변 근거</b>${sources}</div>` : ""}`;
-    } catch (error) { box.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`; }
-    finally { button.disabled = false; button.textContent = "질문하기"; }
-  }
-  async function viewPii(id) { try { const items = await (await api(`/transcripts/${id}/pii`)).json(); const rows = items.map(item => `<tr><td>${escapeHtml(item.pii_type)}</td><td>${escapeHtml(item.original_value)}</td></tr>`).join("") || "<tr><td colspan='2'>저장된 원본이 없습니다.</td></tr>"; showResult(`회의록 #${id} 개인정보 원본`, `<table><tr><th>유형</th><th>원본 값</th></tr>${rows}</table>`); } catch (error) { showResult("원본 조회 오류", `<p class="error">${escapeHtml(error.message)}</p>`); } }
-  async function downloadPdf(id) { try { const response = await api(`/transcripts/${id}/report.pdf`); const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `noting-report-${id}.pdf`; link.click(); URL.revokeObjectURL(url); } catch (error) { showResult("PDF 오류", `<p class="error">${escapeHtml(error.message)}</p>`); } }
-  function showResult(title, content) { $("result-card").classList.remove("hidden"); $("result-subtitle").textContent = title; $("result-content").innerHTML = content; $("result-card").scrollIntoView({ behavior: "smooth", block: "start" }); }
-  function hideResult() { $("result-card").classList.add("hidden"); }
-  async function loadPending() { const box = $("pending-list"); try { const items = await (await api("/users/pending")).json(); if (!items.length) { box.innerHTML = '<div class="empty" style="min-height:100px">대기 중인 가입 요청이 없습니다.</div>'; return; } box.innerHTML = items.map(user => `<div class="admin-row"><div><b>${escapeHtml(user.username)}</b><div class="muted small">${escapeHtml(user.department)} · ${escapeHtml(user.role)}</div></div><div><button class="secondary" type="button" onclick="decide(${user.id}, 'approve')">승인</button> <button class="danger" type="button" onclick="decide(${user.id}, 'reject')">거절</button></div></div>`).join(""); } catch (error) { box.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`; } }
-  async function decide(id, action) { try { await api(`/users/${id}/${action}`, { method: "POST" }); await loadPending(); } catch (error) { alert(error.message); } }
-  async function restoreSession() {
-    if (!token) return;
-    try {
-      await loadMe();
-    } catch (_) {
-      sessionStorage.removeItem("noting_token");
-      token = null;
-      me = null;
-      $("app-view").classList.add("hidden");
-      $("auth-view").classList.remove("hidden");
-    }
-  }
-  void restoreSession();
-</script>
+  <div id="admin-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-backdrop" onclick="closeAdmin()"></div>
+    <section class="modal-card paper-panel"><div class="modal-head"><div><p class="label-caps">ADMIN</p><h2>가입 승인 요청</h2></div><button class="icon-button" type="button" onclick="closeAdmin()">×</button></div><div id="pending-list"></div></section>
+  </div>
+
+  <div id="result-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-backdrop" onclick="hideResult()"></div>
+    <section class="modal-card paper-panel"><div class="modal-head"><div><p class="label-caps">DETAIL</p><h2 id="result-title">조회 결과</h2></div><button class="icon-button" type="button" onclick="hideResult()">×</button></div><div id="result-content"></div></section>
+  </div>
+
+  <script src="/ui/app.js"></script>
 </body>
 </html>

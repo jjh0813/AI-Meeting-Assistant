@@ -21,14 +21,20 @@ class MainRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("아이디를 입력하세요", response.text)
-        self.assertIn('sessionStorage.getItem("noting_token")', response.text)
-        self.assertIn("HTTPS", response.text)
-        self.assertIn("updateTaskStatus", response.text)
-        self.assertIn('method: "PATCH"', response.text)
-        self.assertIn("autoAnalyzeTranscript", response.text)
-        self.assertIn("selectCalendarDate", response.text)
+        self.assertIn('/ui/styles.css', response.text)
+        self.assertIn('/ui/app.js', response.text)
+        self.assertIn("qa-dashboard", response.text)
         self.assertIn("meeting-detail", response.text)
-        self.assertNotIn("요약·일정 분석</button>", response.text)
+
+        script = self.client.get("/ui/app.js")
+        self.assertEqual(script.status_code, 200)
+        self.assertIn('sessionStorage.getItem("noting_token")', script.text)
+        self.assertIn("HTTPS", script.text)
+        self.assertIn("updateTaskStatus", script.text)
+        self.assertIn('method: "PATCH"', script.text)
+        self.assertIn("startAutoAnalysis", script.text)
+        self.assertIn("/analysis/start", script.text)
+        self.assertIn("selectCalendarDate", script.text)
 
     def test_analysis_endpoint_uses_post(self):
         route = next(
@@ -39,6 +45,17 @@ class MainRouteTests(unittest.TestCase):
 
         self.assertIn("POST", route.methods)
         self.assertNotIn("GET", route.methods)
+
+    def test_background_analysis_endpoint_uses_post(self):
+        route = next(
+            route
+            for route in transcript_router.routes
+            if getattr(route, "path", None)
+            == "/transcripts/{transcript_id}/analysis/start"
+        )
+
+        self.assertIn("POST", route.methods)
+        self.assertEqual(route.status_code, 202)
 
 
 if __name__ == "__main__":

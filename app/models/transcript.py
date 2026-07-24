@@ -25,6 +25,10 @@ class Transcript(Base):
     masked_content = Column(Text, nullable=False)
     summary = Column(Text, nullable=True)
     summary_embedding = Column(Vector(768), nullable=True)
+    analysis_status = Column(
+        Text, nullable=False, default="pending", server_default="pending"
+    )
+    analysis_error = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -80,6 +80,8 @@ def update_transcript(
     # searchable or be shown as current after the user edits a meeting.
     transcript.summary = None
     transcript.summary_embedding = None
+    transcript.analysis_status = "pending"
+    transcript.analysis_error = None
     if not transcript.title_is_manual:
         transcript.title = None
     db.query(PiiEntry).filter(
@@ -118,6 +120,8 @@ def save_analysis(
         transcript.title = title.strip() or None
     transcript.summary = summary
     transcript.summary_embedding = embedding
+    transcript.analysis_status = "completed"
+    transcript.analysis_error = None
     existing_items: dict[tuple[str, str], list[ActionItem]] = {}
     for item in (
         db.query(ActionItem)
@@ -170,6 +174,19 @@ def save_analysis(
                 embedding=chunk["embedding"],
             )
         )
+    db.commit()
+    db.refresh(transcript)
+    return transcript
+
+
+def update_analysis_status(
+    db: Session,
+    transcript: Transcript,
+    status: str,
+    error: str | None = None,
+) -> Transcript:
+    transcript.analysis_status = status
+    transcript.analysis_error = error
     db.commit()
     db.refresh(transcript)
     return transcript
