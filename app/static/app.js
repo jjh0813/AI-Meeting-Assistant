@@ -28,6 +28,34 @@ const escapeHtml = value => String(value ?? "").replace(
   char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char],
 );
 
+function renderMarkdown(value) {
+  const inline = text => text
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([^_]+)__/g, "<strong>$1</strong>");
+  const lines = escapeHtml(value).split("\n");
+  const out = [];
+  let listType = null;
+  const closeList = () => { if (listType) { out.push(`</${listType}>`); listType = null; } };
+  for (const line of lines) {
+    const header = line.match(/^\s*#{1,6}\s+(.*)$/);
+    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+    const ordered = line.match(/^\s*\d+\.\s+(.*)$/);
+    if (bullet || ordered) {
+      const want = bullet ? "ul" : "ol";
+      if (listType !== want) { closeList(); out.push(`<${want}>`); listType = want; }
+      out.push(`<li>${inline((bullet || ordered)[1])}</li>`);
+      continue;
+    }
+    closeList();
+    if (header) out.push(`<strong>${inline(header[1])}</strong><br>`);
+    else if (line.trim() === "") out.push("<br>");
+    else out.push(`${inline(line)}<br>`);
+  }
+  closeList();
+  return out.join("");
+}
+
 function showToast(message, type = "") {
   const toast = document.createElement("div");
   toast.className = `toast ${type}`.trim();
@@ -1080,7 +1108,7 @@ async function askMeetingAssistant(event, scope = "dashboard") {
         ${escapeHtml(source.content || source.summary || "근거 내용 없음")}
       </button>
     `).join("");
-    loading.innerHTML = `${escapeHtml(data.answer)}${sources}`;
+    loading.innerHTML = `${renderMarkdown(data.answer)}${sources}`;
   } catch (error) {
     loading.classList.add("error");
     loading.textContent = error.message;

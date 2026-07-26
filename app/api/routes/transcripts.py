@@ -24,6 +24,7 @@ from app.schemas.transcript import (
     TranscriptSearchRequest,
     TranscriptTitleUpdate,
 )
+from app.services import agentic_rag
 from app.services.analyzer import analyze, summarize
 from app.services.chunking import split_text
 from app.services.embedding import embed
@@ -487,61 +488,13 @@ def ask_about_meetings(
     if not question:
         raise HTTPException(status_code=422, detail="질문을 입력해 주세요.")
 
-    guard_result = guard_meeting_question(question)
-    if guard_result is not None:
-        message, reason = guard_result
-        return {
-            "answer": message,
-            "sources": [],
-            "grounded": False,
-            "blocked": True,
-            "blocked_reason": reason,
-        }
-
-    query_embedding = embed(question)
-    if query_embedding is None:
-        raise HTTPException(
-            status_code=503,
-            detail="검색용 임베딩을 생성하지 못했습니다. Ollama 임베딩 모델 상태를 확인해 주세요.",
-        )
-
-    allow_semantic_only = allows_semantic_only_evidence(question)
-    sources = [
-        source
-        for source in find_rag_sources(
-            db, current_user, question, query_embedding, limit=3
-        )
-        if has_sufficient_evidence(
-            source, allow_semantic_only=allow_semantic_only
-        )
-    ]
-    if not sources:
-        return {
-            "answer": NO_EVIDENCE_MESSAGE,
-            "sources": [],
-            "grounded": False,
-            "blocked": True,
-            "blocked_reason": "low_similarity",
-        }
-
-    answer = answer_from_meetings(
-        question, sources, current_user.display_name
+    return agentic_rag.answer_question(
+        db,
+        current_user,
+        question,
+        find_rag_sources=find_rag_sources,
+        no_evidence_message=NO_EVIDENCE_MESSAGE,
     )
-    if answer_indicates_missing_evidence(answer):
-        return {
-            "answer": answer,
-            "sources": [],
-            "grounded": False,
-            "blocked": True,
-            "blocked_reason": "insufficient_context",
-        }
-    return {
-        "answer": answer,
-        "sources": sources,
-        "grounded": True,
-        "blocked": False,
-        "blocked_reason": None,
-    }
 
 
 @router.get("/{transcript_id}/pii")

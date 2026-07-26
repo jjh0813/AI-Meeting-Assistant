@@ -1,0 +1,22 @@
+{
+  "num_samples": 100,
+  "masking": {
+    "total_pii": 400,
+    "masked_pii": 400,
+    "recall": 1.0,
+    "precision": 0.995,
+    "f1": 0.998,
+    "total_masks": 402,
+    "false_positives": 2
+  },
+  "llm": {
+    "llm_runs": 20,
+    "errors": 0,
+    "error_rate": 0.0,
+    "latency_avg_s": 4.65,
+    "latency_p95_s": 31.57,
+    "avg_prompt_tokens": 321.7,
+    "avg_completion_tokens": 132.6,
+    "avg_total_tokens": 454.3
+  }
+}
