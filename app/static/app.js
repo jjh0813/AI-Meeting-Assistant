@@ -970,12 +970,13 @@ function renderMeetingDetail(data, scheduleData = { change_candidates: [] }) {
 }
 
 function renderDetailTasks(transcriptId, tasks) {
-  $("detail-task-count").textContent = `${tasks.length}개`;
-  if (!tasks.length) {
-    $("detail-tasks").innerHTML = '<div class="empty-state">추출된 업무가 없습니다.</div>';
+  const mine = (tasks || []).filter(task => task.is_mine);
+  $("detail-task-count").textContent = `${mine.length}개`;
+  if (!mine.length) {
+    $("detail-tasks").innerHTML = '<div class="empty-state">내가 담당한 업무가 없습니다.</div>';
     return;
   }
-  $("detail-tasks").innerHTML = tasks.map(task => `
+  $("detail-tasks").innerHTML = mine.map(task => `
     <div class="detail-task ${task.status === "완료" ? "done" : ""}">
       <button class="event-check ${task.status === "완료" ? "done" : ""}" type="button" onclick="updateTaskStatus(${transcriptId},${task.id},'${task.status === "완료" ? "대기" : "완료"}',true)">✓</button>
       <div class="detail-task-content"><b>${escapeHtml(task.task || "업무 항목")}</b><small>${escapeHtml(task.assignee || "담당 미지정")} · ${escapeHtml(task.due || "기한 미정")}${task.request ? ` · ${escapeHtml(task.request)}` : ""}</small></div>
