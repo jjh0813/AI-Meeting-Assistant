@@ -13,3 +13,11 @@ wheels/
 # Local documents and generated reports
 docs/
 docs_output/
+
+# Caches & temp artifacts
+.pytest_cache/
+.uv-cache/
+uv-cache/
+tmp/
+*.tmp
+.DS_Store

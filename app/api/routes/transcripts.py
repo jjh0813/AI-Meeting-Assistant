@@ -41,6 +41,7 @@ from app.services.retrieval import (
     allows_semantic_only_evidence,
     answer_indicates_missing_evidence,
     asks_for_personal_tasks,
+    best_excerpt,
     has_sufficient_evidence,
     rerank_sources,
 )
@@ -277,15 +278,17 @@ def find_rag_sources(
                 db, current_user, transcript_id
             )
         pii_entries = pii_cache[transcript_id]
+        personalized_content = personalize_masked_text(
+            source["content"], pii_entries, current_user.display_name
+        )
         personalized_sources.append(
             {
                 **source,
                 "title": personalize_masked_text(
                     source["title"], pii_entries, current_user.display_name
                 ),
-                "content": personalize_masked_text(
-                    source["content"], pii_entries, current_user.display_name
-                ),
+                "content": personalized_content,
+                "excerpt": best_excerpt(query, personalized_content),
                 "summary": personalize_masked_text(
                     source["summary"], pii_entries, current_user.display_name
                 ),

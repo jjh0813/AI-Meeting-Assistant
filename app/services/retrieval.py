@@ -130,6 +130,27 @@ def lexical_similarity(query: str, document: str) -> float:
     return matched / len(query_terms)
 
 
+_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?。])\s+|\n+")
+
+
+def best_excerpt(query: str, content: str, max_sentences: int = 2) -> str:
+    text = (content or "").strip()
+    if not text:
+        return ""
+    sentences = [s.strip() for s in _SENTENCE_BOUNDARY.split(text) if s.strip()]
+    if len(sentences) <= 1:
+        return text
+    scored = sorted(
+        ((i, lexical_similarity(query, sentences[i])) for i in range(len(sentences))),
+        key=lambda pair: pair[1],
+        reverse=True,
+    )
+    relevant = [i for i, score in scored if score > 0][:max_sentences]
+    if not relevant:
+        return sentences[0]
+    return " ".join(sentences[i] for i in sorted(relevant))
+
+
 def rerank_sources(query: str, sources: list[dict], limit: int) -> list[dict]:
     reranked = []
     for source in sources:
