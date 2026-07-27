@@ -36,11 +36,11 @@ def _rewrite_question(question: str):
     return rewritten
 
 
-def _search(db, current_user, query_text, find_rag_sources):
+def _search(db, current_user, query_text, original_question, find_rag_sources):
     query_embedding = embed(query_text)
     if query_embedding is None:
         return None
-    allow_semantic_only = allows_semantic_only_evidence(query_text)
+    allow_semantic_only = allows_semantic_only_evidence(original_question)
     return [
         source
         for source in find_rag_sources(db, current_user, query_text, query_embedding, limit=3)
@@ -74,7 +74,7 @@ def answer_question(
         message, reason = guard_result
         return _blocked(reason, message, 0, False, None)
 
-    sources = _search(db, current_user, question, find_rag_sources)
+    sources = _search(db, current_user, question, question, find_rag_sources)
     if sources is None:
         raise ExternalServiceError(
             "검색용 임베딩을 생성하지 못했습니다. Ollama 임베딩 모델 상태를 확인해 주세요.",
@@ -91,7 +91,7 @@ def answer_question(
             return _blocked("low_similarity", no_evidence_message, 1, False, None)
         rewritten_flag = True
         attempts = 2
-        second = _search(db, current_user, rewritten_question, find_rag_sources)
+        second = _search(db, current_user, rewritten_question, question, find_rag_sources)
         if not second:
             return _blocked(
                 "low_similarity", no_evidence_message, 2, True, rewritten_question

@@ -198,6 +198,7 @@ def find_rag_sources(
     chunk_sources = [
         {
             "id": transcript.id,
+            "title": transcript.title or f"회의록 #{transcript.id}",
             "chunk_id": chunk.id,
             "chunk_index": chunk.chunk_index,
             "content": chunk.content,
@@ -217,6 +218,7 @@ def find_rag_sources(
     summary_sources = [
         {
             "id": transcript.id,
+            "title": transcript.title or f"회의록 #{transcript.id}",
             "chunk_id": None,
             "chunk_index": None,
             "content": transcript.summary,
@@ -246,6 +248,7 @@ def find_rag_sources(
         task_sources.append(
             {
                 "id": transcript.id,
+                "title": transcript.title or f"회의록 #{transcript.id}",
                 "chunk_id": None,
                 "chunk_index": None,
                 "content": "\n".join(
@@ -277,6 +280,9 @@ def find_rag_sources(
         personalized_sources.append(
             {
                 **source,
+                "title": personalize_masked_text(
+                    source["title"], pii_entries, current_user.display_name
+                ),
                 "content": personalize_masked_text(
                     source["content"], pii_entries, current_user.display_name
                 ),

@@ -1102,13 +1102,15 @@ async function askMeetingAssistant(event, scope = "dashboard") {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question }),
     })).json();
-    const sources = (data.sources || []).map(source => `
-      <button class="chat-source" type="button" onclick="openTranscript(${source.id})">
-        회의록 #${source.id}${source.chunk_index === null || source.chunk_index === undefined ? "" : ` · 본문 ${source.chunk_index + 1}`} · 유사도 ${source.similarity}<br />
-        ${escapeHtml(source.content || source.summary || "근거 내용 없음")}
-      </button>
-    `).join("");
-    loading.innerHTML = `${renderMarkdown(data.answer)}${sources}`;
+    const linkStyle = "background:none;border:0;padding:0;color:#3d6eea;font-weight:700;font-size:13px;text-decoration:underline;cursor:pointer;text-align:left;";
+    const bodyStyle = "margin:4px 0 12px;padding:8px 11px;border-left:3px solid #e5eaf2;background:#f7f9fd;border-radius:0 8px 8px 0;color:#465164;font-size:13px;white-space:pre-wrap;";
+    const sourceItems = (data.sources || []).map(source => {
+      const title = source.title || `회의록 #${source.id}`;
+      const snippet = source.content || source.summary || "";
+      return `<div style="margin-top:10px;"><button type="button" style="${linkStyle}" onclick="openTranscript(${source.id})">🔗 ${escapeHtml(title)}</button>${snippet ? `<div style="${bodyStyle}">${escapeHtml(snippet)}</div>` : ""}</div>`;
+    }).join("");
+    const sourcesBlock = sourceItems ? `<hr style="border:none;border-top:1px solid #e5eaf2;margin:14px 0 2px;" />${sourceItems}` : "";
+    loading.innerHTML = `${renderMarkdown(data.answer)}${sourcesBlock}`;
   } catch (error) {
     loading.classList.add("error");
     loading.textContent = error.message;

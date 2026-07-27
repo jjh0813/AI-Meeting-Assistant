@@ -15,3 +15,8 @@ dependencies = [
     "reportlab>=5.0.0",
     "sqlalchemy>=2.0.51",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
