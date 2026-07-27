@@ -80,6 +80,7 @@ function showAuth(tab) {
   $("auth-subtitle").textContent = loginMode
     ? "내 회의 작업대로 로그인하세요."
     : "관리자 승인 후 내 계정의 회의 작업대를 사용할 수 있습니다.";
+  setRoute(loginMode ? "#/login" : "#/signup");
 }
 
 function toggleSidebar(open) {
@@ -251,7 +252,14 @@ async function loadMe() {
   $("admin-nav").classList.toggle("hidden", !admin);
   $("pii-button").classList.toggle("hidden", !admin);
   startCurrentClock();
-  if (approved) await refreshDashboard();
+  if (approved) {
+    await refreshDashboard();
+    const first = location.hash.replace(/^#\/?/, "").split("/")[0];
+    if (!first || first === "login" || first === "signup") {
+      history.replaceState(null, "", "#/main");
+    }
+    applyRoute();
+  }
 }
 
 function logout() {
@@ -268,6 +276,7 @@ function logout() {
   closeNotifications();
   $("app-view").classList.add("hidden");
   $("auth-view").classList.remove("hidden");
+  history.replaceState(null, "", "#/login");
   closeComposer();
   closeAdmin();
   hideResult();
@@ -457,6 +466,35 @@ function renderDateMeetings() {
   }).join("");
 }
 
+const PAGE_TO_SLUG = { workspace: "main", meetings: "meetings", tasks: "tasks", archive: "archive" };
+const SLUG_TO_PAGE = { main: "workspace", meetings: "meetings", tasks: "tasks", archive: "archive" };
+let routing = false;
+
+function setRoute(hash) {
+  if (routing || location.hash === hash) return;
+  history.pushState(null, "", hash);
+}
+
+function applyRoute() {
+  routing = true;
+  try {
+    const [seg, id] = location.hash.replace(/^#\/?/, "").split("/");
+    if (!token || !me) {
+      showAuth(seg === "signup" ? "signup" : "login");
+    } else if (me.status !== "승인") {
+      return;
+    } else if (seg === "meeting" && id) {
+      openTranscript(Number(id));
+    } else {
+      showPage(SLUG_TO_PAGE[seg] || "workspace");
+    }
+  } finally {
+    routing = false;
+  }
+}
+
+window.addEventListener("popstate", applyRoute);
+
 function showPage(page, targetId = null) {
   currentPage = page;
   currentTranscriptId = null;
@@ -489,6 +527,7 @@ function showPage(page, targetId = null) {
   if (page === "tasks") renderTasksPage();
   if (targetId) setTimeout(() => $(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" }), 40);
   else window.scrollTo({ top: 0, behavior: "smooth" });
+  setRoute(`#/${PAGE_TO_SLUG[page] || "main"}`);
 }
 
 function showDashboard(targetId = null) {
@@ -718,11 +757,13 @@ async function deleteArchivedTask(transcriptId, taskId) {
 function openComposer() {
   toggleSidebar(false);
   $("composer-modal").classList.remove("hidden");
+  document.body.classList.add("modal-open");
   setTimeout(() => $("new-content").focus(), 40);
 }
 
 function closeComposer() {
   $("composer-modal").classList.add("hidden");
+  document.body.classList.remove("modal-open");
 }
 
 function setComposerMode(mode) {
@@ -872,6 +913,7 @@ function encodeWav(chunks, sampleRate) {
 async function openTranscript(id) {
   if (currentTranscriptId !== id) detailReturnPage = currentPage;
   currentTranscriptId = id;
+  setRoute(`#/meeting/${id}`);
   toggleSidebar(false);
   ["dashboard-view", "all-meetings-view", "tasks-view", "archive-view"].forEach(viewId => $(viewId).classList.add("hidden"));
   $("meeting-detail").classList.remove("hidden");
@@ -1155,20 +1197,24 @@ function showResult(title, html) {
   $("result-title").textContent = title;
   $("result-content").innerHTML = html;
   $("result-modal").classList.remove("hidden");
+  document.body.classList.add("modal-open");
 }
 
 function hideResult() {
   $("result-modal").classList.add("hidden");
+  document.body.classList.remove("modal-open");
 }
 
 async function openAdmin() {
   toggleSidebar(false);
   $("admin-modal").classList.remove("hidden");
+  document.body.classList.add("modal-open");
   await loadPending();
 }
 
 function closeAdmin() {
   $("admin-modal").classList.add("hidden");
+  document.body.classList.remove("modal-open");
 }
 
 async function loadPending() {
@@ -1213,4 +1259,6 @@ document.addEventListener("keydown", event => {
   if (event.key === "Escape") closeNotifications();
 });
 
-restoreSession();
+restoreSession().finally(() => {
+  if (!token) applyRoute();
+});
