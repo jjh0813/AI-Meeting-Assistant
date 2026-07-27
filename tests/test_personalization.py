@@ -6,6 +6,7 @@ from app.services.personalization import (
     is_assigned_to_user,
     personalize_masked_text,
     remask_personalized_text,
+    restore_all_pii,
 )
 
 
@@ -79,6 +80,35 @@ class PersonalizationTests(unittest.TestCase):
         )
 
         self.assertEqual(result, "김철수님은 작성하고 [이름]님은 검토합니다.")
+
+    def test_admin_original_view_restores_all_indexed_pii(self):
+        entries = [
+            SimpleNamespace(
+                pii_type="name",
+                original_value="김철수",
+                placeholder_token="[이름#1]",
+            ),
+            SimpleNamespace(
+                pii_type="name",
+                original_value="박영희",
+                placeholder_token="[이름#2]",
+            ),
+            SimpleNamespace(
+                pii_type="phone",
+                original_value="010-1234-5678",
+                placeholder_token="[전화번호#1]",
+            ),
+        ]
+
+        result = restore_all_pii(
+            "[이름#1]님과 [이름#2]님이 [전화번호#1]로 연락했습니다.",
+            entries,
+        )
+
+        self.assertEqual(
+            result,
+            "김철수님과 박영희님이 010-1234-5678로 연락했습니다.",
+        )
 
     def test_assignment_uses_private_token_mapping(self):
         entries = [

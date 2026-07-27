@@ -4,11 +4,23 @@ from unittest.mock import Mock, patch
 
 from fastapi import HTTPException
 
-from app.api.routes.transcripts import get_transcript_tasks, stored_analysis
+from app.api.routes.transcripts import get_transcript_tasks, read_pii, router, stored_analysis
 from app.api.routes.users import router as users_router
 
 
 class AccessAndReportTests(unittest.TestCase):
+    def test_pii_original_route_requires_admin(self):
+        route = next(
+            route
+            for route in router.routes
+            if route.path == "/transcripts/{transcript_id}/pii"
+        )
+        dependency_names = {
+            dependency.call.__name__ for dependency in route.dependant.dependencies
+        }
+
+        self.assertIn("get_current_admin", dependency_names)
+
     def test_same_department_list_requires_approved_user(self):
         route = next(
             route
@@ -117,6 +129,38 @@ class AccessAndReportTests(unittest.TestCase):
         self.assertEqual([task["id"] for task in result["tasks"]], [1])
         self.assertEqual(result["tasks"][0]["assignee"], "김철수")
         self.assertTrue(result["tasks"][0]["is_mine"])
+
+    @patch("app.api.routes.transcripts.transcript_repo.get_pii_entries")
+    @patch("app.api.routes.transcripts.transcript_repo.get_transcript")
+    def test_admin_original_view_returns_restored_transcript(
+        self, get_transcript, get_pii_entries
+    ):
+        get_transcript.return_value = SimpleNamespace(
+            id=7,
+            title="[이름#1] 주간회의",
+            masked_content="[이름#1]님과 [이름#2]님이 배포를 논의했습니다.",
+        )
+        get_pii_entries.return_value = [
+            SimpleNamespace(
+                pii_type="name",
+                original_value="김철수",
+                placeholder_token="[이름#1]",
+            ),
+            SimpleNamespace(
+                pii_type="name",
+                original_value="박영희",
+                placeholder_token="[이름#2]",
+            ),
+        ]
+        current_admin = SimpleNamespace(id=3)
+
+        result = read_pii(7, current_admin, Mock())
+
+        self.assertEqual(result["title"], "김철수 주간회의")
+        self.assertEqual(
+            result["original_content"],
+            "김철수님과 박영희님이 배포를 논의했습니다.",
+        )
 
 
 if __name__ == "__main__":

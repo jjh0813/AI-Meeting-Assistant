@@ -25,6 +25,10 @@ class MainRouteTests(unittest.TestCase):
         self.assertIn('/ui/app.js', response.text)
         self.assertIn("qa-dashboard", response.text)
         self.assertIn("meeting-detail", response.text)
+        self.assertIn('id="signup-username"', response.text)
+        self.assertIn('minlength="3"', response.text)
+        self.assertIn('id="signup-password"', response.text)
+        self.assertIn('minlength="8"', response.text)
 
         script = self.client.get("/ui/app.js")
         self.assertEqual(script.status_code, 200)
@@ -35,6 +39,9 @@ class MainRouteTests(unittest.TestCase):
         self.assertIn("startAutoAnalysis", script.text)
         self.assertIn("/analysis/start", script.text)
         self.assertIn("selectCalendarDate", script.text)
+        self.assertIn("formatApiErrorDetail", script.text)
+        self.assertIn("string_too_short", script.text)
+        self.assertNotIn("throw new Error(payload.detail)", script.text)
 
     def test_analysis_endpoint_uses_post(self):
         route = next(

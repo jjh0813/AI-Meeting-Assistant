@@ -43,6 +43,21 @@ def personalize_masked_text(
     return INDEXED_PII_PATTERN.sub(replace, value)
 
 
+def restore_all_pii(value: str | None, pii_entries) -> str | None:
+    """Restore every indexed PII token for an authorized original-content view."""
+    if value is None:
+        return None
+    originals = {
+        entry.placeholder_token: entry.original_value
+        for entry in pii_entries
+        if entry.placeholder_token and entry.original_value
+    }
+    return INDEXED_PII_PATTERN.sub(
+        lambda match: originals.get(match.group(0), match.group(0)),
+        value,
+    )
+
+
 def is_assigned_to_user(
     assignee: str | None, pii_entries, display_name: str | None
 ) -> bool:

@@ -33,6 +33,7 @@ from app.services.personalization import (
     is_assigned_to_user,
     personalize_masked_text,
     remask_personalized_text,
+    restore_all_pii,
 )
 from app.services.qa import answer_from_meetings
 from app.services.question_guard import guard_meeting_question
@@ -512,10 +513,17 @@ def read_pii(
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
+    transcript = transcript_repo.get_transcript(db, current_user, transcript_id)
+    if transcript is None:
+        raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
     entries = transcript_repo.get_pii_entries(db, current_user, transcript_id)
-    return [
-        {"pii_type": e.pii_type, "original_value": e.original_value} for e in entries
-    ]
+    return {
+        "id": transcript.id,
+        "title": restore_all_pii(
+            transcript.title or f"회의록 #{transcript.id}", entries
+        ),
+        "original_content": restore_all_pii(transcript.masked_content, entries),
+    }
 
 
 @router.get("/{transcript_id}/summary")

@@ -27,6 +27,50 @@ const escapeHtml = value => String(value ?? "").replace(
   /[&<>'"]/g,
   char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char],
 );
+const API_FIELD_LABELS = {
+  username: "아이디",
+  display_name: "이름",
+  password: "비밀번호",
+  department: "부서",
+  role: "역할",
+  question: "질문",
+  content: "회의 내용",
+  title: "제목",
+};
+
+function formatApiValidationItem(item, fallback) {
+  if (typeof item === "string") return item;
+  if (!item || typeof item !== "object") return fallback;
+  const field = Array.isArray(item.loc)
+    ? [...item.loc].reverse().find(part => typeof part === "string" && part !== "body")
+    : null;
+  const label = API_FIELD_LABELS[field] || field || "입력값";
+  const context = item.ctx || {};
+  if (item.type === "missing") return `${label}을(를) 입력해 주세요.`;
+  if (item.type === "string_too_short") {
+    return `${label}은(는) ${context.min_length || "필요한"}자 이상 입력해 주세요.`;
+  }
+  if (item.type === "string_too_long") {
+    return `${label}은(는) ${context.max_length || "허용된"}자 이하로 입력해 주세요.`;
+  }
+  if (item.type === "enum") return `${label} 선택값이 올바르지 않습니다.`;
+  return item.msg ? `${label}: ${item.msg}` : fallback;
+}
+
+function formatApiErrorDetail(detail, fallback = "요청을 처리하지 못했습니다.") {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.map(item => formatApiValidationItem(item, fallback));
+    return [...new Set(messages)].join("\n") || fallback;
+  }
+  if (detail && typeof detail === "object") {
+    return formatApiErrorDetail(
+      detail.detail || detail.message || detail.msg,
+      fallback,
+    );
+  }
+  return fallback;
+}
 
 function renderMarkdown(value) {
   const inline = text => text
@@ -178,7 +222,7 @@ async function api(path, options = {}) {
     let detail = response.statusText || "요청을 처리하지 못했습니다.";
     try {
       const payload = await response.json();
-      detail = payload.detail || detail;
+      detail = formatApiErrorDetail(payload.detail, detail);
     } catch (_) {
       // Non-JSON responses still use the HTTP status text.
     }
@@ -1193,10 +1237,12 @@ async function downloadPdf(id) {
 async function viewPii(id) {
   closeDetailMenu();
   try {
-    const items = await (await api(`/transcripts/${id}/pii`)).json();
-    const rows = items.map(item => `<tr><td>${escapeHtml(item.pii_type)}</td><td>${escapeHtml(item.original_value)}</td></tr>`).join("")
-      || '<tr><td colspan="2">저장된 원본이 없습니다.</td></tr>';
-    showResult("개인정보 원본", `<table class="result-table"><thead><tr><th>유형</th><th>원본 값</th></tr></thead><tbody>${rows}</tbody></table>`);
+    const data = await (await api(`/transcripts/${id}/pii`)).json();
+    const content = data.original_content || "저장된 원본 회의록이 없습니다.";
+    showResult(
+      data.title || "원본 회의록",
+      `<p class="pii-access-note">관리자 전용 원본 보기입니다. 마스킹된 이름과 전화번호를 실제 값으로 복원했습니다.</p><div class="pii-original-content">${escapeHtml(content)}</div>`,
+    );
   } catch (error) {
     showToast(error.message, "error");
   }
