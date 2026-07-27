@@ -192,10 +192,16 @@ def find_rag_sources(
     query: str,
     query_embedding: list[float],
     limit: int,
+    source_types: set[str] | None = None,
 ) -> list[dict]:
+    selected_types = source_types or {"chunk", "summary", "action_item"}
     candidate_limit = min(max(limit * 4, 20), 100)
-    chunk_matches = transcript_repo.search_similar_chunks(
-        db, current_user, query_embedding, candidate_limit
+    chunk_matches = (
+        transcript_repo.search_similar_chunks(
+            db, current_user, query_embedding, candidate_limit
+        )
+        if "chunk" in selected_types
+        else []
     )
     chunk_sources = [
         {
@@ -213,8 +219,12 @@ def find_rag_sources(
         }
         for chunk, transcript, distance in chunk_matches
     ]
-    summary_matches = transcript_repo.search_similar_summaries(
-        db, current_user, query_embedding, candidate_limit
+    summary_matches = (
+        transcript_repo.search_similar_summaries(
+            db, current_user, query_embedding, candidate_limit
+        )
+        if "summary" in selected_types
+        else []
     )
     chunk_transcript_ids = {source["id"] for source in chunk_sources}
     summary_sources = [
@@ -234,8 +244,12 @@ def find_rag_sources(
         for transcript, distance in summary_matches
         if transcript.id not in chunk_transcript_ids
     ]
-    task_matches = transcript_repo.search_action_items_for_qa(
-        db, current_user, query_embedding, candidate_limit
+    task_matches = (
+        transcript_repo.search_action_items_for_qa(
+            db, current_user, query_embedding, candidate_limit
+        )
+        if "action_item" in selected_types
+        else []
     )
     personal_task_query = asks_for_personal_tasks(query)
     task_sources = []

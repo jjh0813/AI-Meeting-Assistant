@@ -1178,6 +1178,25 @@ function askSuggested(question, scope) {
   askMeetingAssistant(null, scope);
 }
 
+function renderAgentTrace(data) {
+  const trace = data.trace || [];
+  if (!trace.length) return "";
+  const icon = { completed: "✓", retry: "↻", blocked: "!" };
+  const steps = trace.map(step => `
+    <li class="agent-trace-step ${escapeHtml(step.status || "completed")}">
+      <span class="agent-trace-icon">${icon[step.status] || "·"}</span>
+      <span><b>${escapeHtml(step.label || step.node)}</b><small>${escapeHtml(step.detail || "")}</small></span>
+    </li>
+  `).join("");
+  const intent = data.intent_label ? `<span class="agent-intent">${escapeHtml(data.intent_label)}</span>` : "";
+  return `
+    <details class="agent-trace" open>
+      <summary><span>Agentic RAG 실행 과정</span>${intent}<em>${trace.length}단계</em></summary>
+      <ol>${steps}</ol>
+    </details>
+  `;
+}
+
 async function askMeetingAssistant(event, scope = "dashboard") {
   event?.preventDefault();
   const input = $(`qa-${scope}-input`);
@@ -1190,7 +1209,7 @@ async function askMeetingAssistant(event, scope = "dashboard") {
   submit.disabled = true;
   const loading = document.createElement("div");
   loading.className = "chat-bubble ai";
-  loading.innerHTML = '<div class="analysis-loading"><span class="spinner"></span>회의 근거를 검색하고 있습니다.</div>';
+  loading.innerHTML = '<div class="analysis-loading"><span class="spinner"></span>Agent가 질문 의도와 회의 근거를 분석하고 있습니다.</div>';
   messages.appendChild(loading);
   messages.scrollTop = messages.scrollHeight;
   try {
@@ -1207,7 +1226,7 @@ async function askMeetingAssistant(event, scope = "dashboard") {
       return `<div style="margin-top:10px;"><button type="button" style="${linkStyle}" onclick="openTranscript(${source.id})">🔗 ${escapeHtml(title)}</button>${snippet ? `<div style="${bodyStyle}">${escapeHtml(snippet)}</div>` : ""}</div>`;
     }).join("");
     const sourcesBlock = sourceItems ? `<hr style="border:none;border-top:1px solid #e5eaf2;margin:14px 0 2px;" />${sourceItems}` : "";
-    loading.innerHTML = `${renderMarkdown(data.answer)}${sourcesBlock}`;
+    loading.innerHTML = `${renderAgentTrace(data)}<div class="agent-answer">${renderMarkdown(data.answer)}</div>${sourcesBlock}`;
   } catch (error) {
     loading.classList.add("error");
     loading.textContent = error.message;

@@ -1,5 +1,7 @@
 import unittest
+from unittest.mock import Mock, patch
 
+from app.api.routes.transcripts import find_rag_sources
 from app.services.retrieval import (
     allows_semantic_only_evidence,
     answer_indicates_missing_evidence,
@@ -12,6 +14,28 @@ from app.services.retrieval import (
 
 
 class RetrievalTests(unittest.TestCase):
+    @patch("app.api.routes.transcripts.transcript_repo.search_action_items_for_qa")
+    @patch("app.api.routes.transcripts.transcript_repo.search_similar_summaries")
+    @patch("app.api.routes.transcripts.transcript_repo.search_similar_chunks")
+    def test_selected_retriever_skips_unselected_database_searches(
+        self, search_chunks, search_summaries, search_tasks
+    ):
+        search_tasks.return_value = []
+
+        results = find_rag_sources(
+            Mock(),
+            Mock(),
+            "내 담당 업무",
+            [0.1] * 768,
+            limit=3,
+            source_types={"action_item"},
+        )
+
+        self.assertEqual(results, [])
+        search_chunks.assert_not_called()
+        search_summaries.assert_not_called()
+        search_tasks.assert_called_once()
+
     def test_best_excerpt_keeps_the_most_relevant_sentences(self):
         content = (
             "회의를 시작했습니다. "

@@ -62,10 +62,11 @@ flowchart LR
 | Embedding model | nomic-embed-text | 회의록 및 질문 벡터화 |
 | Speech recognition | CLOVA Speech | 한국어 음성 인식 |
 | Authentication | JWT, Argon2 | Bearer 인증과 비밀번호 해싱 |
+| Agent workflow | LangGraph | RAG 상태·노드·조건 분기와 실행 trace |
 | Reporting | ReportLab | PDF 회의 보고서 생성 |
 | Package management | uv | 의존성 및 가상환경 관리 |
 
-별도의 에이전트 프레임워크는 사용하지 않습니다. 처리 순서와 권한 경계가 명확한 서비스이므로 FastAPI 서비스 계층에서 파이프라인을 직접 구성해 동작과 실패 지점을 추적할 수 있도록 했습니다.
+LangGraph는 회의 Q&A의 Agentic RAG 흐름에만 사용합니다. 인증·권한·분석·저장 로직은 기존 FastAPI 서비스 계층에 유지해 에이전트가 사용자 범위 밖의 데이터나 임의 도구에 접근하지 못하게 제한합니다.
 
 ## 보안 및 권한 모델
 
@@ -86,13 +87,18 @@ flowchart LR
 
 ## RAG 검색 구조
 
-검색은 단일 벡터 유사도에만 의존하지 않습니다.
+검색은 단일 벡터 유사도에만 의존하지 않으며 LangGraph 상태 그래프로 실행됩니다.
 
-1. pgvector에서 최종 반환 개수보다 넓은 후보군을 조회합니다.
-2. 한국어 표현과 회의 도메인 동의어를 정규화합니다.
-3. 벡터 유사도 65%와 어휘 유사도 35%를 결합해 후보를 재정렬합니다.
-4. 최고 검색 점수와 명시적 어휘 근거가 부족하면 LLM 호출 전에 차단합니다.
-5. LLM 답변이 근거 부족을 나타내는 경우 `insufficient_context` 상태로 교정합니다.
+1. `scope_guard`가 회의·업무 범위를 벗어난 질문을 검색 전에 차단합니다.
+2. `route_intent`가 질문을 개인 업무, 업무, 일정, 결정, 미결, 일반 회의 유형으로 분류합니다.
+3. `select_retriever`가 회의 본문, 요약, 실행 항목 중 필요한 DB 검색기만 선택합니다.
+4. `retrieve`가 pgvector에서 최종 반환 개수보다 넓은 후보군을 조회합니다.
+5. `grade_evidence`가 벡터 유사도 65%와 어휘 유사도 35%의 결합 점수로 근거를 평가합니다.
+6. 근거가 부족하면 `rewrite_query`가 원래 의도를 유지한 검색 질문을 한 번 만들고 재검색합니다.
+7. 두 번의 검색에서도 근거가 부족하면 LLM 답변 생성 전에 차단합니다.
+8. `generate_answer`는 검증된 근거만 사용하고 `verify_answer`가 근거 부족 표현을 최종 검사합니다.
+
+검색은 최초 1회와 재작성 후 1회를 합쳐 최대 2회만 수행되므로 그래프가 무한 반복되지 않습니다. 각 노드의 상태와 설명은 `trace`로 반환되어 프론트의 `Agentic RAG 실행 과정`에서 확인할 수 있습니다.
 
 질의응답 API는 다음 상태를 함께 반환합니다.
 
@@ -100,6 +106,10 @@ flowchart LR
 - `blocked`: 질문 또는 근거 부족으로 답변이 차단됐는지 여부
 - `blocked_reason`: `out_of_scope`, `low_similarity`, `insufficient_context` 등 차단 사유
 - `sources`: 답변 생성에 사용한 현재 계정 소유 회의록 근거
+- `intent`, `selected_source_types`: 분류된 의도와 실제 선택한 검색기
+- `retrieval_attempts`, `rewritten_question`: 검색 횟수와 질문 보정 결과
+- `verification`: 최종 답변 검증 상태
+- `trace`: LangGraph 노드별 실행 상태와 사용자용 설명
 
 ## 저장소 구조
 
