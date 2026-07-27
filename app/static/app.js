@@ -519,7 +519,7 @@ function showPage(page, targetId = null) {
   const [label, caption] = headers[page] || headers.workspace;
   $("page-header-label").textContent = label;
   $("workspace-caption").textContent = caption;
-  $("detail-menu").classList.add("hidden");
+  closeDetailMenu();
   hideTitleEditor();
   toggleSidebar(false);
   if (page === "archive") loadArchive();
@@ -694,7 +694,7 @@ async function archiveTranscript(id) {
 
 async function archiveCurrentTranscript() {
   if (!currentTranscriptId) return;
-  $("detail-menu").classList.add("hidden");
+  closeDetailMenu();
   const id = currentTranscriptId;
   await archiveTranscript(id);
   showPage("archive");
@@ -732,11 +732,11 @@ async function restoreArchivedTask(transcriptId, taskId) {
 
 async function deleteArchivedTranscript(id) {
   const target = archivedTranscripts.find(item => item.id === id);
-  if (!window.confirm(`"${target?.title || `회의록 #${id}`}"을(를) 영구 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) return;
+  if (!window.confirm(`"${target?.title || `회의록 #${id}`}"을(를) DB에서 영구 삭제할까요? 연결된 회의 청크와 업무도 삭제되며 되돌릴 수 없습니다.`)) return;
   try {
     await api(`/transcripts/${id}`, { method: "DELETE" });
-    await loadArchive();
-    showToast("보관된 회의를 영구 삭제했습니다.");
+    await Promise.all([loadArchive(), refreshDashboard()]);
+    showToast("회의와 연결 데이터를 DB에서 영구 삭제했습니다.");
   } catch (error) {
     showToast(error.message, "error");
   }
@@ -1062,11 +1062,19 @@ async function saveDetailContent() {
 }
 
 function toggleDetailMenu() {
-  $("detail-menu").classList.toggle("hidden");
+  const menu = $("detail-menu");
+  const willOpen = menu.classList.contains("hidden");
+  menu.classList.toggle("hidden");
+  $("detail-menu-button").setAttribute("aria-expanded", String(willOpen));
+}
+
+function closeDetailMenu() {
+  $("detail-menu").classList.add("hidden");
+  $("detail-menu-button").setAttribute("aria-expanded", "false");
 }
 
 function showTitleEditor() {
-  $("detail-menu").classList.add("hidden");
+  closeDetailMenu();
   $("title-edit").classList.remove("hidden");
   $("title-input").focus();
 }
@@ -1167,7 +1175,7 @@ async function askMeetingAssistant(event, scope = "dashboard") {
 
 async function downloadPdf(id) {
   if (!id) return;
-  $("detail-menu").classList.add("hidden");
+  closeDetailMenu();
   try {
     const response = await api(`/transcripts/${id}/report.pdf`);
     const blob = await response.blob();
@@ -1183,7 +1191,7 @@ async function downloadPdf(id) {
 }
 
 async function viewPii(id) {
-  $("detail-menu").classList.add("hidden");
+  closeDetailMenu();
   try {
     const items = await (await api(`/transcripts/${id}/pii`)).json();
     const rows = items.map(item => `<tr><td>${escapeHtml(item.pii_type)}</td><td>${escapeHtml(item.original_value)}</td></tr>`).join("")
@@ -1255,9 +1263,19 @@ async function restoreSession() {
 
 document.addEventListener("click", event => {
   if (!$("notification-center")?.contains(event.target)) closeNotifications();
+  const detailMenu = $("detail-menu");
+  const detailMenuButton = $("detail-menu-button");
+  if (
+    !detailMenu?.classList.contains("hidden")
+    && !detailMenu.contains(event.target)
+    && !detailMenuButton?.contains(event.target)
+  ) {
+    closeDetailMenu();
+  }
 });
 document.addEventListener("keydown", event => {
   if (event.key === "Escape") closeNotifications();
+  if (event.key === "Escape") closeDetailMenu();
 });
 
 restoreSession().finally(() => {

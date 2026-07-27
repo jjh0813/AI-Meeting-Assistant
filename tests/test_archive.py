@@ -45,6 +45,17 @@ class TranscriptArchiveTests(unittest.TestCase):
         db.delete.assert_not_called()
         db.commit.assert_not_called()
 
+    def test_permanent_delete_removes_archived_transcript_and_commits(self):
+        db = Mock()
+        transcript = SimpleNamespace(id=10, archived=True)
+        query = db.query.return_value
+        query.filter.return_value.all.return_value = []
+
+        delete_archived_transcript(db, transcript)
+
+        db.delete.assert_called_once_with(transcript)
+        db.commit.assert_called_once()
+
     def test_action_item_archive_and_restore(self):
         db = Mock()
         item = SimpleNamespace(archived=False, archived_at=None)
