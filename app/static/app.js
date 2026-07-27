@@ -1051,6 +1051,7 @@ async function saveTitle() {
 }
 
 async function updateTaskStatus(transcriptId, taskId, status, reopen = false) {
+  const scrollY = window.scrollY;
   try {
     await api(`/transcripts/${transcriptId}/tasks/${taskId}`, {
       method: "PATCH",
@@ -1060,6 +1061,7 @@ async function updateTaskStatus(transcriptId, taskId, status, reopen = false) {
     await refreshDashboard();
     if (reopen && currentTranscriptId === transcriptId) await openTranscript(transcriptId);
     else if (currentPage === "tasks") renderTasksPage();
+    window.scrollTo({ top: scrollY });
   } catch (error) {
     showToast(error.message, "error");
   }
