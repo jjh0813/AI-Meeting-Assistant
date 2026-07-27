@@ -11,10 +11,20 @@ class FakeUser:
 
 @pytest.fixture
 def patched(monkeypatch):
-    state = {"find_calls": 0, "rewrite_calls": 0, "answer_questions": []}
+    state = {
+        "find_calls": 0,
+        "rewrite_calls": 0,
+        "answer_questions": [],
+        "evidence_policy_questions": [],
+    }
     monkeypatch.setattr(ar, "embed", lambda q: [0.1] * 768)
     monkeypatch.setattr(ar, "has_sufficient_evidence", lambda s, allow_semantic_only=False: True)
-    monkeypatch.setattr(ar, "allows_semantic_only_evidence", lambda q: False)
+
+    def _allows_semantic_only(question):
+        state["evidence_policy_questions"].append(question)
+        return False
+
+    monkeypatch.setattr(ar, "allows_semantic_only_evidence", _allows_semantic_only)
     monkeypatch.setattr(ar, "guard_meeting_question", lambda q: None)
     monkeypatch.setattr(ar, "answer_indicates_missing_evidence", lambda a: False)
 
@@ -68,6 +78,7 @@ def test_rewrite_then_success_uses_original_question(patched):
     assert r["grounded"] and r["retrieval_attempts"] == 2 and r["rewritten"] is True
     assert r["rewritten_question"] == "내 담당 업무"
     assert state["answer_questions"] == ["내 할 일 뭐야?"]
+    assert state["evidence_policy_questions"] == ["내 할 일 뭐야?", "내 할 일 뭐야?"]
 
 
 def test_rewrite_then_still_blocked(patched):

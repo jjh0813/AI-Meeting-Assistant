@@ -7,7 +7,6 @@ NAME_CANDIDATE = re.compile(rf"(?<![가-힣])([{SURNAMES}][가-힣]{{1,2}})")
 
 TITLES = ("님", "씨", "군", "양", "과장", "대리", "부장", "차장", "사원", "팀장", "이사", "대표", "사장", "선생", "교수", "주임", "연구원")
 JOSA = ("이", "가", "은", "는", "을", "를", "에게", "한테", "께", "와", "과", "랑")
-LIST_MARKERS = (",", "、", "·", ":")
 STOPWORDS = {
     "이번", "이것", "이제", "이거", "이때", "이후", "이전", "정리", "정도", "조금",
     "오늘", "최근", "최고", "최대", "최소", "문제", "방법", "방향", "전체", "전달",
@@ -17,24 +16,62 @@ STOPWORDS = {
     "연락", "연락처", "연구", "연결", "연간", "조정", "조건", "조율", "유효", "유지",
     "정산", "진행", "진척", "성과", "성공", "성장", "방문", "방식", "방침", "배송",
     "결과", "고객", "확정", "차질", "차이", "정책", "박스", "허가", "심사",
+    "변경", "공유",
 }
 NAME_THRESHOLD = 0.7
+NAME_WORD = rf"[{SURNAMES}][가-힣]{{1,2}}"
+NAME_LIST_PATTERN = re.compile(
+    rf"(?<![가-힣])({NAME_WORD}(?:\s*(?:,|、|·|및|그리고)\s*{NAME_WORD})+)"
+)
+PERSON_CONTEXT_PATTERN = re.compile(
+    r"참석|참여|함께|동석|모인|모여|사람|인원|인물|구성원|멤버|"
+    r"담당자|발표자|보고자|진행자|사회자|세\s*명|두\s*명|네\s*명|"
+    r"다섯\s*명|여섯\s*명|일곱\s*명|여덟\s*명|아홉\s*명|\d+\s*명|"
+    r"세\s*분|두\s*분|네\s*분|\d+\s*분"
+)
+
+
+def _speaker_label(preceding: str, following: str) -> bool:
+    line_prefix = preceding.rsplit("\n", 1)[-1]
+    return not line_prefix.strip() and following.lstrip().startswith(":")
 
 
 def _name_score(candidate: str, preceding: str, following: str) -> float:
-    score = 0.5
-    if 2 <= len(candidate) <= 3:
-        score += 0.1
-    head = following.lstrip()
+    score = 0.35
+    score += 0.15 if len(candidate) == 3 else 0.05
+    head = following
     if head.startswith(TITLES):
-        score += 0.4
+        score += 0.5
+    elif head.lstrip().startswith(TITLES):
+        score += 0.45
     elif head.startswith(JOSA):
         score += 0.25
-    elif head[:1] in LIST_MARKERS or head.startswith("및"):
-        score += 0.25
-    if preceding.rstrip().endswith((",", "、", "·")):
-        score += 0.2
+    if _speaker_label(preceding, following):
+        score += 0.5
     return score
+
+
+def _contextual_list_names(text: str) -> set[str]:
+    contextual_names: set[str] = set()
+    for list_match in NAME_LIST_PATTERN.finditer(text):
+        start, end = list_match.span(1)
+        surrounding = text[max(0, start - 50):min(len(text), end + 50)]
+        names = [match.group(1) for match in NAME_CANDIDATE.finditer(list_match.group(1))]
+        corroborated = False
+        for name in names:
+            for occurrence in re.finditer(re.escape(name), text):
+                if start <= occurrence.start() < end:
+                    continue
+                preceding = text[max(0, occurrence.start() - 20):occurrence.start()]
+                following = text[occurrence.end():occurrence.end() + 10]
+                if _name_score(name, preceding, following) >= NAME_THRESHOLD:
+                    corroborated = True
+                    break
+            if corroborated:
+                break
+        if PERSON_CONTEXT_PATTERN.search(surrounding) or corroborated:
+            contextual_names.update(name for name in names if name not in STOPWORDS)
+    return contextual_names
 
 
 def mask_text(text: str, initial_counts: dict[str, int] | None = None):
@@ -57,6 +94,7 @@ def mask_text(text: str, initial_counts: dict[str, int] | None = None):
         return token
 
     masked = PHONE_PATTERN.sub(_mask_phone, text)
+    contextual_list_names = _contextual_list_names(masked)
 
     def _mask_name(match):
         candidate = match.group(1)
@@ -64,7 +102,10 @@ def mask_text(text: str, initial_counts: dict[str, int] | None = None):
             return candidate
         preceding = match.string[max(0, match.start() - 4):match.start()]
         following = match.string[match.end():match.end() + 6]
-        if _name_score(candidate, preceding, following) >= NAME_THRESHOLD:
+        if (
+            candidate in contextual_list_names
+            or _name_score(candidate, preceding, following) >= NAME_THRESHOLD
+        ):
             counters["name"] += 1
             token = f"[이름#{counters['name']}]"
             found.append(

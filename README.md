@@ -264,7 +264,7 @@ uv run uvicorn app.main:app --reload
 단위 테스트:
 
 ```powershell
-uv run python -m unittest discover -s tests -v
+uv run --group dev pytest -q
 ```
 
 현재 테스트 범위:

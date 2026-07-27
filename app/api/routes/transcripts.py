@@ -583,6 +583,11 @@ def get_transcript_tasks(
         raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
     items = transcript_repo.get_action_items(db, current_user, transcript_id)
     pii_entries = transcript_repo.get_pii_entries(db, current_user, transcript_id)
+    personal_tasks = []
+    for item in items:
+        serialized = serialize_action_item(item, pii_entries, current_user)
+        if serialized["is_mine"]:
+            personal_tasks.append(serialized)
     return {
         "id": transcript.id,
         "title": personalize_masked_text(
@@ -603,10 +608,7 @@ def get_transcript_tasks(
         ),
         "analysis_status": transcript.analysis_status,
         "analysis_error": transcript.analysis_error,
-        "tasks": [
-            serialize_action_item(item, pii_entries, current_user)
-            for item in items
-        ],
+        "tasks": personal_tasks,
     }
 
 

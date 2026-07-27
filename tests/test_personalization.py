@@ -18,6 +18,46 @@ class PersonalizationTests(unittest.TestCase):
         self.assertEqual(entries[0]["original_value"], "김철수")
         self.assertEqual(entries[0]["placeholder_token"], "[이름#1]")
 
+    def test_spoken_participant_list_is_masked_from_natural_context(self):
+        masked, entries = mask_text(
+            "오늘 김철수, 박영희, 이민수 이렇게 세 명이 함께 회의했습니다."
+        )
+
+        self.assertEqual(masked.count("[이름#"), 3)
+        self.assertEqual(
+            [entry["original_value"] for entry in entries],
+            ["김철수", "박영희", "이민수"],
+        )
+
+    def test_names_in_list_are_masked_when_corroborated_later(self):
+        masked, entries = mask_text(
+            "김철수, 박영희, 이민수 순서로 의견을 냈습니다. "
+            "마지막으로 김철수님이 결론을 정리했습니다."
+        )
+
+        self.assertEqual(masked.count("[이름#"), 4)
+        self.assertEqual(
+            {entry["original_value"] for entry in entries},
+            {"김철수", "박영희", "이민수"},
+        )
+
+    def test_general_work_list_is_not_mistaken_for_names(self):
+        masked, entries = mask_text(
+            "일정, 변경, 조치 사항을 확인하고 프로젝트 변경, 결과 공유 및 정리를 논의했습니다."
+        )
+
+        self.assertEqual(
+            masked,
+            "일정, 변경, 조치 사항을 확인하고 프로젝트 변경, 결과 공유 및 정리를 논의했습니다.",
+        )
+        self.assertEqual(entries, [])
+
+    def test_speaker_label_is_masked_without_structured_participant_header(self):
+        masked, entries = mask_text("김철수: 배포 일정을 확인하겠습니다.")
+
+        self.assertTrue(masked.startswith("[이름#1]:"))
+        self.assertEqual(entries[0]["original_value"], "김철수")
+
     def test_only_current_users_name_is_restored(self):
         entries = [
             SimpleNamespace(

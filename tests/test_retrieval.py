@@ -3,6 +3,7 @@ import unittest
 from app.services.retrieval import (
     allows_semantic_only_evidence,
     answer_indicates_missing_evidence,
+    best_excerpt,
     asks_for_personal_tasks,
     has_sufficient_evidence,
     lexical_similarity,
@@ -11,6 +12,19 @@ from app.services.retrieval import (
 
 
 class RetrievalTests(unittest.TestCase):
+    def test_best_excerpt_keeps_the_most_relevant_sentences(self):
+        content = (
+            "회의를 시작했습니다. "
+            "배포 일정은 8월 3일로 결정했습니다. "
+            "김철수님이 배포 전 점검을 담당합니다."
+        )
+
+        excerpt = best_excerpt("배포 일정과 담당자는?", content)
+
+        self.assertIn("배포 일정은 8월 3일", excerpt)
+        self.assertIn("김철수님이 배포 전 점검", excerpt)
+        self.assertNotIn("회의를 시작했습니다", excerpt)
+
     def test_domain_aliases_match_paraphrased_erp_question(self):
         score = lexical_similarity(
             "새 회계 시스템으로 바꾸는 날짜가 언제지?",
