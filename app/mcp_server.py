@@ -1,10 +1,12 @@
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import jwt
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import AnyHttpUrl
 
 from app.core.config import settings
@@ -14,6 +16,30 @@ from app.models.transcript import ActionItem, ActionItemStatus, Transcript
 from app.models.user import Status, User
 from app.services.google_calendar import list_upcoming_events, sync_user_tasks
 from app.services.personalization import is_assigned_to_user, personalize_masked_text
+
+
+def build_transport_security(*urls: str) -> TransportSecuritySettings:
+    allowed_hosts = {"127.0.0.1:*", "localhost:*", "[::1]:*"}
+    allowed_origins = {
+        "http://127.0.0.1:*",
+        "http://localhost:*",
+        "http://[::1]:*",
+    }
+    for value in urls:
+        parsed = urlparse(value)
+        if not parsed.scheme or not parsed.hostname:
+            continue
+        host = parsed.hostname
+        default_port = 443 if parsed.scheme == "https" else 80
+        if parsed.port and parsed.port != default_port:
+            host = f"{host}:{parsed.port}"
+        allowed_hosts.add(host)
+        allowed_origins.add(f"{parsed.scheme}://{host}")
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=sorted(allowed_hosts),
+        allowed_origins=sorted(allowed_origins),
+    )
 
 
 class NotingJwtVerifier(TokenVerifier):
@@ -66,6 +92,10 @@ mcp = FastMCP(
     stateless_http=True,
     json_response=True,
     streamable_http_path="/",
+    transport_security=build_transport_security(
+        settings.mcp_issuer_url,
+        settings.mcp_resource_server_url,
+    ),
 )
 
 

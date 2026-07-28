@@ -3,7 +3,7 @@ import asyncio
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.mcp_server import mcp
+from app.mcp_server import build_transport_security, mcp
 
 
 def test_mcp_registers_expected_tools():
@@ -37,3 +37,15 @@ def test_mcp_http_requires_bearer_token():
         )
 
     assert response.status_code == 401
+
+
+def test_mcp_transport_security_allows_configured_https_domain():
+    security = build_transport_security(
+        "https://noting.kro.kr",
+        "https://noting.kro.kr/mcp",
+    )
+
+    assert security.enable_dns_rebinding_protection is True
+    assert "noting.kro.kr" in security.allowed_hosts
+    assert "https://noting.kro.kr" in security.allowed_origins
+    assert "localhost:*" in security.allowed_hosts
