@@ -25,7 +25,7 @@ class GoogleCalendarConnection(Base):
     google_subject = Column(Text, nullable=True, index=True)
     google_email = Column(Text, nullable=True)
     calendar_id = Column(Text, nullable=False, default="primary")
-    encrypted_access_token = Column(Text, nullable=False)
+    encrypted_access_token = Column(Text, nullable=True)
     encrypted_refresh_token = Column(Text, nullable=True)
     token_expires_at = Column(DateTime(timezone=True), nullable=True)
     scopes = Column(Text, nullable=False, default="")

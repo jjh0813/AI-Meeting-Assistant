@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
@@ -91,6 +92,21 @@ def test_oauth_requests_permission_for_app_created_calendars():
     assert "https://www.googleapis.com/auth/calendar.app.created" in gc.GOOGLE_SCOPES
 
 
+def test_oauth_always_prompts_for_google_account_selection(monkeypatch):
+    monkeypatch.setattr(gc.settings, "google_client_id", "client-id")
+    monkeypatch.setattr(gc.settings, "google_client_secret", "client-secret")
+    monkeypatch.setattr(
+        gc.settings,
+        "google_calendar_redirect_uri",
+        "https://noting.example/calendar/google/callback",
+    )
+
+    url = gc.build_authorization_url(SimpleNamespace(id=7))
+    query = parse_qs(urlparse(url).query)
+
+    assert query["prompt"] == ["select_account consent"]
+
+
 def test_dedicated_calendar_body_identifies_noting_account(monkeypatch):
     monkeypatch.setattr(gc.settings, "google_calendar_timezone", "Asia/Seoul")
     user = SimpleNamespace(
@@ -149,6 +165,26 @@ def test_sync_rejects_legacy_primary_calendar(monkeypatch):
     assert "전용 Google 캘린더" in exc_info.value.detail
 
 
+def test_inactive_connection_preserves_calendar_but_reports_disconnected(monkeypatch):
+    connection = SimpleNamespace(
+        calendar_id="noting-user-7@group.calendar.google.com",
+        google_email="owner@example.com",
+        encrypted_refresh_token=None,
+        encrypted_access_token=None,
+    )
+    monkeypatch.setattr(
+        gc,
+        "get_connection_record",
+        Mock(return_value=connection),
+    )
+
+    status = gc.connection_status(Mock(), SimpleNamespace(id=7))
+
+    assert status["connected"] is False
+    assert status["isolated"] is True
+    assert status["calendar_id"] == "noting-user-7@group.calendar.google.com"
+
+
 def test_disconnect_does_not_revoke_shared_google_account(monkeypatch):
     connection = SimpleNamespace(
         id=10,
@@ -157,22 +193,21 @@ def test_disconnect_does_not_revoke_shared_google_account(monkeypatch):
         encrypted_refresh_token="encrypted-refresh",
         encrypted_access_token="encrypted-access",
     )
-    monkeypatch.setattr(gc, "get_connection", Mock(return_value=connection))
+    monkeypatch.setattr(gc, "get_connection_record", Mock(return_value=connection))
     revoke = Mock()
     monkeypatch.setattr(gc.httpx, "post", revoke)
     db = Mock()
     shared_query = Mock()
     shared_query.filter.return_value = shared_query
     shared_query.first.return_value = SimpleNamespace(id=11)
-    event_query = Mock()
-    event_query.filter.return_value = event_query
-    db.query.side_effect = [shared_query, event_query]
+    db.query.return_value = shared_query
 
     assert gc.disconnect_calendar(db, SimpleNamespace(id=7)) is True
 
     revoke.assert_not_called()
-    event_query.delete.assert_called_once()
-    db.delete.assert_called_once_with(connection)
+    assert connection.encrypted_access_token is None
+    assert connection.encrypted_refresh_token is None
+    db.add.assert_called_once_with(connection)
     db.commit.assert_called_once()
 
 
@@ -184,7 +219,7 @@ def test_disconnect_revokes_when_google_account_is_not_shared(monkeypatch):
         encrypted_refresh_token="encrypted-refresh",
         encrypted_access_token="encrypted-access",
     )
-    monkeypatch.setattr(gc, "get_connection", Mock(return_value=connection))
+    monkeypatch.setattr(gc, "get_connection_record", Mock(return_value=connection))
     monkeypatch.setattr(gc, "_decrypt", Mock(return_value="refresh-token"))
     revoke_response = Mock(spec=httpx.Response)
     revoke = Mock(return_value=revoke_response)
@@ -193,10 +228,10 @@ def test_disconnect_revokes_when_google_account_is_not_shared(monkeypatch):
     shared_query = Mock()
     shared_query.filter.return_value = shared_query
     shared_query.first.return_value = None
-    event_query = Mock()
-    event_query.filter.return_value = event_query
-    db.query.side_effect = [shared_query, event_query]
+    db.query.return_value = shared_query
 
     assert gc.disconnect_calendar(db, SimpleNamespace(id=7)) is True
 
     assert revoke.call_args.args[0] == gc.GOOGLE_REVOKE_URL
+    assert connection.encrypted_access_token is None
+    assert connection.encrypted_refresh_token is None

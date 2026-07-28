@@ -164,7 +164,7 @@ JWT 기본 만료 시간은 60분입니다. 범용 MCP 클라이언트에서 로
 8. 동일 업무는 `google_calendar_event_links`로 식별해 중복 생성하지 않고 수정합니다.
 9. 업무 완료·대체·삭제·아카이브 시 연결된 Google 일정을 제거합니다.
 
-동일한 Google 계정을 여러 Noting 계정에서 선택하더라도 각 Noting 계정은 서로 다른 보조 캘린더를 사용합니다. 한 Noting 계정의 연결을 해제할 때 같은 Google 계정을 사용하는 다른 연결이 있으면 Google 프로젝트 권한 전체를 폐기하지 않고 현재 계정의 로컬 연결만 제거합니다. 이전 버전에서 `primary` 캘린더에 연결된 사용자는 화면의 `전용 캘린더 설정` 버튼으로 OAuth 권한을 다시 승인해야 합니다.
+동일한 Google 계정을 여러 Noting 계정에서 선택하더라도 각 Noting 계정은 서로 다른 보조 캘린더를 사용합니다. Noting에서 로그아웃하거나 Google 연결을 해제하면 현재 Noting 계정의 OAuth 토큰을 제거해 다음 연결에서 Google 계정 선택 화면을 다시 거치게 합니다. 전용 캘린더 ID와 일정 연결 정보는 보존하므로 같은 Google 계정으로 다시 승인했을 때 기존 전용 캘린더를 재사용합니다. 같은 Google 계정을 사용하는 다른 활성 연결이 있으면 해당 연결의 토큰까지 무효화하지 않습니다. 이전 버전에서 `primary` 캘린더에 연결된 사용자는 화면의 `전용 캘린더 설정` 버튼으로 OAuth 권한을 다시 승인해야 합니다.
 
 회의 분석, 업무 상태 변경, 일정 변경 확정과 아카이브 처리 후에는 자동 동기화를 시도합니다. Google API 장애가 발생해도 핵심 회의 저장이나 업무 변경은 롤백하지 않으며, 캘린더 동기화 실패만 로그로 남겨 다음 동기화에서 다시 맞춥니다.
 
@@ -296,7 +296,7 @@ uv run python -m scripts.migrate_user_identity_and_ownership
 uv run python scripts/migrate_google_calendar.py
 ```
 
-`migrate_google_calendar.py`는 기존 `google_calendar_connections` 테이블에 Google 고정 사용자 식별자 컬럼과 인덱스를 추가합니다. 운영 서버에서는 애플리케이션을 재시작하기 전에 이 마이그레이션을 먼저 실행해야 합니다.
+`migrate_google_calendar.py`는 기존 `google_calendar_connections` 테이블에 Google 고정 사용자 식별자 컬럼과 인덱스를 추가하고, 로그아웃 상태에서 액세스 토큰을 제거할 수 있도록 해당 컬럼을 nullable로 변경합니다. 운영 서버에서는 애플리케이션을 재시작하기 전에 이 마이그레이션을 먼저 실행해야 합니다.
 
 로컬 개발용 사용자를 추가할 때:
 

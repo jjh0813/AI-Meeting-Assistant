@@ -33,6 +33,10 @@ STATEMENTS = (
     ON google_calendar_connections(google_subject)
     """,
     """
+    ALTER TABLE google_calendar_connections
+    ALTER COLUMN encrypted_access_token DROP NOT NULL
+    """,
+    """
     CREATE TABLE IF NOT EXISTS google_calendar_event_links (
         id SERIAL PRIMARY KEY,
         user_id INTEGER NOT NULL

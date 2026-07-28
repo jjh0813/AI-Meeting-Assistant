@@ -44,6 +44,8 @@ class MainRouteTests(unittest.TestCase):
         self.assertNotIn("throw new Error(payload.detail)", script.text)
         self.assertIn("renderAgentTrace", script.text)
         self.assertIn("Agentic RAG 실행 과정", script.text)
+        self.assertIn('fetch("/calendar/google/disconnect"', script.text)
+        self.assertIn("async function logout(disconnectGoogle = true)", script.text)
 
     def test_analysis_endpoint_uses_post(self):
         route = next(

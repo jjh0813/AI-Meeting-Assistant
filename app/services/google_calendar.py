@@ -269,7 +269,9 @@ def exchange_code(db: Session, code: str, state: str) -> GoogleCalendarConnectio
     return connection
 
 
-def get_connection(db: Session, user: User) -> GoogleCalendarConnection | None:
+def get_connection_record(
+    db: Session, user: User
+) -> GoogleCalendarConnection | None:
     return (
         db.query(GoogleCalendarConnection)
         .filter(GoogleCalendarConnection.user_id == user.id)
@@ -277,17 +279,38 @@ def get_connection(db: Session, user: User) -> GoogleCalendarConnection | None:
     )
 
 
-def connection_status(db: Session, user: User) -> dict:
-    connection = get_connection(db, user)
-    requires_reconnect = bool(
+def _connection_is_active(connection: GoogleCalendarConnection | None) -> bool:
+    return bool(
         connection
+        and (
+            connection.encrypted_access_token
+            or connection.encrypted_refresh_token
+        )
+    )
+
+
+def get_connection(db: Session, user: User) -> GoogleCalendarConnection | None:
+    connection = get_connection_record(db, user)
+    return connection if _connection_is_active(connection) else None
+
+
+def connection_status(db: Session, user: User) -> dict:
+    connection = get_connection_record(db, user)
+    connected = _connection_is_active(connection)
+    requires_reconnect = bool(
+        connected
+        and connection
         and (not connection.calendar_id or connection.calendar_id == "primary")
     )
     return {
         "configured": calendar_is_configured(),
-        "connected": connection is not None,
-        "isolated": connection is not None and not requires_reconnect,
-        "requires_reconnect": requires_reconnect,
+        "connected": connected,
+        "isolated": bool(
+            connection
+            and connection.calendar_id
+            and connection.calendar_id != "primary"
+        ),
+        "requires_reconnect": bool(requires_reconnect),
         "email": connection.google_email if connection else None,
         "calendar_id": connection.calendar_id if connection else None,
         "reminder_minutes": settings.google_calendar_reminder_minutes,
@@ -740,8 +763,8 @@ def list_upcoming_events(db: Session, user: User, days: int = 7) -> list[dict]:
 
 
 def disconnect_calendar(db: Session, user: User) -> bool:
-    connection = get_connection(db, user)
-    if connection is None:
+    connection = get_connection_record(db, user)
+    if not _connection_is_active(connection):
         return False
 
     identity_filters = []
@@ -761,6 +784,10 @@ def disconnect_calendar(db: Session, user: User) -> bool:
             .filter(
                 GoogleCalendarConnection.id != connection.id,
                 or_(*identity_filters),
+                or_(
+                    GoogleCalendarConnection.encrypted_access_token.isnot(None),
+                    GoogleCalendarConnection.encrypted_refresh_token.isnot(None),
+                ),
             )
             .first()
             is not None
@@ -781,9 +808,9 @@ def disconnect_calendar(db: Session, user: User) -> bool:
             )
         except httpx.HTTPError:
             logger.info("Google token revocation failed for user %s", user.id)
-    db.query(GoogleCalendarEventLink).filter(
-        GoogleCalendarEventLink.user_id == user.id
-    ).delete()
-    db.delete(connection)
+    connection.encrypted_access_token = None
+    connection.encrypted_refresh_token = None
+    connection.token_expires_at = None
+    db.add(connection)
     db.commit()
     return True

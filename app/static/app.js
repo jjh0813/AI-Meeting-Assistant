@@ -223,7 +223,7 @@ function renderGoogleCalendarStatus() {
       ? `${googleCalendarStatus.email || "Google 계정"}에 연결됨`
       : "Google Calendar를 연결하세요.";
   $("calendar-status-copy").textContent = requiresReconnect
-    ? "같은 Google 계정을 사용해도 Noting 계정마다 일정이 섞이지 않도록 Google 권한을 다시 승인해 주세요."
+    ? "기존 연결을 계정 전용 캘린더 방식으로 전환하려면 Google 권한을 다시 승인해 주세요."
     : connected
       ? "본인에게 배정된 기한 업무를 계정 전용 캘린더에 동기화하고 일정 하루 전에 알림을 보냅니다."
     : googleCalendarStatus?.configured
@@ -324,7 +324,7 @@ async function api(path, options = {}) {
     } catch (_) {
       // Non-JSON responses still use the HTTP status text.
     }
-    if (response.status === 401 && token) logout();
+    if (response.status === 401 && token) void logout(false);
     throw new Error(detail);
   }
   return response;
@@ -405,7 +405,23 @@ async function loadMe() {
   }
 }
 
-function logout() {
+async function logout(disconnectGoogle = true) {
+  const logoutToken = token;
+  if (disconnectGoogle && logoutToken) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    try {
+      await fetch("/calendar/google/disconnect", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${logoutToken}` },
+        signal: controller.signal,
+      });
+    } catch (_) {
+      // Noting logout must continue even when Google unlinking fails.
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
   sessionStorage.removeItem("noting_token");
   token = null;
   me = null;
