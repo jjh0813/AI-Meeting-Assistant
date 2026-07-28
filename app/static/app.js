@@ -11,6 +11,7 @@ let currentPage = "workspace";
 let detailReturnPage = "workspace";
 let analysisPollId = null;
 let clockTimerId = null;
+let googleCalendarStatus = null;
 let recorder = {
   stream: null,
   context: null,
@@ -209,6 +210,92 @@ function closeNotifications() {
   $("notification-button")?.setAttribute("aria-expanded", "false");
 }
 
+function renderGoogleCalendarStatus() {
+  const connected = Boolean(googleCalendarStatus?.connected);
+  $("google-calendar-button")?.classList.toggle("connected", connected);
+  $("google-calendar-dot")?.classList.toggle("active", connected);
+  if (!$("calendar-status-title")) return;
+  $("calendar-status-title").textContent = connected
+    ? `${googleCalendarStatus.email || "Google 계정"}에 연결됨`
+    : "Google Calendar를 연결하세요.";
+  $("calendar-status-copy").textContent = connected
+    ? "본인에게 배정된 기한 업무를 동기화하고 일정 하루 전에 팝업과 이메일 알림을 보냅니다."
+    : googleCalendarStatus?.configured
+      ? "Noting 업무를 Google Calendar 일정과 하루 전 알림으로 연결할 수 있습니다."
+      : "서버에 Google OAuth 설정이 필요합니다.";
+  $("calendar-connect-action").classList.toggle("hidden", connected);
+  $("calendar-connect-action").disabled = !googleCalendarStatus?.configured;
+  $("calendar-connected-actions").classList.toggle("hidden", !connected);
+}
+
+async function loadGoogleCalendarStatus({ autoSync = false } = {}) {
+  try {
+    googleCalendarStatus = await (await api("/calendar/google/status")).json();
+    renderGoogleCalendarStatus();
+    const syncKey = `noting_calendar_synced_${me?.username || "user"}`;
+    if (autoSync && googleCalendarStatus.connected && !sessionStorage.getItem(syncKey)) {
+      sessionStorage.setItem(syncKey, "1");
+      await syncGoogleCalendar(true);
+    }
+  } catch (_) {
+    googleCalendarStatus = { configured: false, connected: false };
+    renderGoogleCalendarStatus();
+  }
+}
+
+async function openCalendarSettings() {
+  $("calendar-modal").classList.remove("hidden");
+  setMessage("calendar-settings-message", "");
+  await loadGoogleCalendarStatus();
+}
+
+function closeCalendarSettings() {
+  $("calendar-modal").classList.add("hidden");
+}
+
+async function connectGoogleCalendar() {
+  try {
+    const data = await (await api("/calendar/google/connect")).json();
+    location.assign(data.authorization_url);
+  } catch (error) {
+    setMessage("calendar-settings-message", error.message, "error");
+  }
+}
+
+async function syncGoogleCalendar(silent = false) {
+  const button = $("calendar-sync-button");
+  if (button) button.disabled = true;
+  try {
+    const data = await (await api("/calendar/google/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        calendar_id: googleCalendarStatus?.calendar_id || "primary",
+      }),
+    })).json();
+    const message = `동기화 완료: 추가 ${data.created}개 · 수정 ${data.updated}개 · 정리 ${data.deleted}개`;
+    if (!silent) setMessage("calendar-settings-message", message, "success");
+    else showToast(message);
+  } catch (error) {
+    if (!silent) setMessage("calendar-settings-message", error.message, "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function disconnectGoogleCalendar() {
+  if (!confirm("Google Calendar 연결을 해제할까요? 이미 만들어진 일정은 Google Calendar에 남습니다.")) return;
+  try {
+    await api("/calendar/google/disconnect", { method: "DELETE" });
+    googleCalendarStatus = { ...googleCalendarStatus, connected: false, email: null };
+    sessionStorage.removeItem(`noting_calendar_synced_${me?.username || "user"}`);
+    renderGoogleCalendarStatus();
+    setMessage("calendar-settings-message", "Google Calendar 연결을 해제했습니다.", "success");
+  } catch (error) {
+    setMessage("calendar-settings-message", error.message, "error");
+  }
+}
+
 function openNotificationMeeting(transcriptId) {
   closeNotifications();
   openTranscript(transcriptId);
@@ -298,6 +385,7 @@ async function loadMe() {
   startCurrentClock();
   if (approved) {
     await refreshDashboard();
+    await loadGoogleCalendarStatus({ autoSync: true });
     const first = location.hash.replace(/^#\/?/, "").split("/")[0];
     if (!first || first === "login" || first === "signup") {
       history.replaceState(null, "", "#/main");
@@ -314,6 +402,7 @@ function logout() {
   dashboardTasks = [];
   archivedTranscripts = [];
   archivedTasks = [];
+  googleCalendarStatus = null;
   if (analysisPollId) clearTimeout(analysisPollId);
   if (clockTimerId) clearInterval(clockTimerId);
   clockTimerId = null;

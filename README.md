@@ -14,8 +14,11 @@ Noting은 회계·경영·영업 부서가 하나의 AI 인프라를 공유하�
 - 날짜별 회의 목록과 회의 상세 화면, 사용자 제목 수정
 - PostgreSQL·pgvector 기반 계정별 RAG 검색
 - 회의록 근거 기반 Q&A와 근거 부족·범위 밖 질문 차단
+- LangGraph 기반 Agentic RAG 의도 분류·검색기 선택·질문 재작성·답변 검증
+- MCP Streamable HTTP 서버를 통한 회의 검색·질의응답·개인 업무 도구 제공
 - 유사 업무 탐지 및 일정 변경 후보 확인
 - 업무 상태 관리와 캘린더형 대시보드
+- 본인 담당 업무의 Google Calendar 자동 동기화와 하루 전 알림
 - 텍스트 및 PDF 보고서 생성
 - 부서 관리자 기반 가입 승인과 계정 소유권 보호
 
@@ -23,18 +26,23 @@ Noting은 회계·경영·영업 부서가 하나의 AI 인프라를 공유하�
 
 ```mermaid
 flowchart LR
-    U["브라우저 UI"] --> API["FastAPI"]
-    API --> AUTH["인증·승인·계정 소유권"]
-    API --> STT["CLOVA Speech"]
-    API --> MASK["개인정보 마스킹"]
+    U["브라우저 UI"] --> REST["FastAPI REST API"]
+    MC["MCP 클라이언트"] --> MCP["FastMCP / Streamable HTTP"]
+    REST --> AUTH["인증·승인·계정 소유권"]
+    MCP --> AUTH
+    AUTH --> SVC["공통 서비스 계층"]
+    SVC --> STT["CLOVA Speech"]
+    SVC --> MASK["개인정보 마스킹"]
     MASK --> DB[("PostgreSQL + pgvector")]
-    API --> EMB["Ollama / nomic-embed-text"]
-    API --> LLM["Ollama / Gemma"]
+    SVC --> EMB["Ollama / nomic-embed-text"]
+    SVC --> LLM["Ollama / Gemma"]
     DB --> RET["계정 필터 + 하이브리드 검색"]
     EMB --> RET
-    RET --> LLM
-    LLM --> API
-    API --> REPORT["텍스트·PDF 보고서"]
+    RET --> AGENT["LangGraph Agentic RAG"]
+    AGENT --> LLM
+    LLM --> SVC
+    SVC --> GCAL["Google Calendar API"]
+    SVC --> REPORT["텍스트·PDF 보고서"]
 ```
 
 ### 데이터 처리 흐름
@@ -46,9 +54,13 @@ flowchart LR
 5. 사용자가 마스킹된 회의록을 수정하면 기존 분석을 무효화하고 자동으로 다시 분석합니다.
 6. 회의록 청크·요약·업무 항목을 임베딩해 pgvector에 저장합니다.
 7. 질문 시 현재 로그인 계정이 소유한 데이터만 검색하고, 벡터 및 어휘 점수를 결합해 근거를 재정렬합니다.
-8. 충분한 근거가 있을 때만 Gemma가 답변하며, 결과에는 근거 문서와 차단 상태가 함께 반환됩니다.
+8. LangGraph가 근거 점수를 평가하고 필요하면 질문을 한 번 재작성한 뒤 다시 검색합니다.
+9. 충분한 근거가 있을 때만 Gemma가 답변하며, 결과에는 근거 문서, 차단 상태와 노드별 실행 과정이 함께 반환됩니다.
+10. 본인에게 배정된 업무에 해석 가능한 기한이 있고 Google Calendar가 연결돼 있으면 분석 완료 후 일정과 하루 전 알림을 동기화합니다.
 
 회의록이 수정되면 이전 요약, 업무 항목 및 검색 청크를 제거한 뒤 자동으로 다시 분석합니다. 사용자가 직접 수정한 회의 제목은 재분석해도 유지됩니다.
+
+Google Calendar 자동 등록은 발언 순간의 실시간 등록이 아닙니다. 회의록 저장과 분석이 완료되어 담당자·업무·기한이 구조화된 후 실행됩니다. `오늘`, `내일`, `모레`, `8월 25일`, `2026년 8월 25일`, `오후 3시`, `15:30` 형식을 해석하며, `조만간`, `가능한 빨리`처럼 날짜가 확정되지 않은 표현은 Noting 업무에는 남지만 Google 일정으로는 만들지 않습니다.
 
 ## 기술 스택
 
@@ -63,6 +75,9 @@ flowchart LR
 | Speech recognition | CLOVA Speech | 한국어 음성 인식 |
 | Authentication | JWT, Argon2 | Bearer 인증과 비밀번호 해싱 |
 | Agent workflow | LangGraph | RAG 상태·노드·조건 분기와 실행 trace |
+| Tool protocol | MCP Python SDK, FastMCP | 외부 AI 클라이언트용 표준 도구 서버 |
+| Calendar | Google Calendar API, OAuth 2.0 | 개인 업무 일정과 하루 전 알림 동기화 |
+| Token protection | Fernet | Google OAuth 토큰 암호화 저장 |
 | Reporting | ReportLab | PDF 회의 보고서 생성 |
 | Package management | uv | 의존성 및 가상환경 관리 |
 
@@ -82,6 +97,8 @@ LangGraph는 회의 Q&A의 Agentic RAG 흐름에만 사용합니다. 인증·권
 - 같은 부서 사용자라도 다른 계정이 저장한 회의 데이터에는 접근할 수 없습니다.
 - 일반 화면에서는 현재 사용자 본인 이름만 복원하고 다른 이름과 전화번호는 계속 마스킹합니다.
 - LLM과 임베딩 모델에는 번호가 붙은 내부 마스킹 토큰을 사용하며, RAG 답변 시 서버가 본인 이름만 선택적으로 복원합니다.
+- MCP 도구도 전달된 Noting JWT의 사용자를 다시 조회한 후 동일한 계정 소유권 조건을 적용합니다.
+- Google OAuth 연결과 일정 연결 정보는 사용자별로 분리하고 액세스·갱신 토큰은 암호화해 저장합니다.
 
 현재 계정 격리는 애플리케이션 쿼리 계층에서 수행합니다. 운영 환경에서는 PostgreSQL Row-Level Security, 감사 로그, 비밀 관리 시스템을 추가하는 것을 권장합니다.
 
@@ -111,6 +128,42 @@ LangGraph는 회의 Q&A의 Agentic RAG 흐름에만 사용합니다. 인증·권
 - `verification`: 최종 답변 검증 상태
 - `trace`: LangGraph 노드별 실행 상태와 사용자용 설명
 
+## MCP 서버
+
+FastAPI 애플리케이션은 `/mcp/`에 stateless Streamable HTTP MCP 서버를 함께 제공합니다. MCP 도구는 별도 데이터 접근 우회 경로를 만들지 않고 기존 서비스와 사용자 소유권 필터를 재사용합니다.
+
+| 도구 | 기능 |
+|---|---|
+| `search_meetings` | 현재 계정의 회의 본문·요약·업무에서 관련 근거 검색 |
+| `ask_meetings` | 현재 계정 근거만 사용하는 LangGraph Agentic RAG 답변 |
+| `list_my_tasks` | 현재 사용자에게 배정된 개인 업무 조회 |
+| `get_meeting` | 현재 계정이 소유한 특정 회의 상세 조회 |
+| `list_calendar_events` | Google Calendar에 동기화한 향후 Noting 일정 조회 |
+| `sync_calendar_tasks` | 본인 업무를 Google Calendar에 생성·수정·삭제 동기화 |
+
+현재 MCP 인증은 Noting 로그인에서 발급한 JWT를 Bearer 토큰으로 전달하는 내부 연동 방식입니다.
+
+```text
+MCP URL: https://서비스도메인/mcp/
+Authorization: Bearer <Noting JWT>
+```
+
+JWT 기본 만료 시간은 60분입니다. 범용 MCP 클라이언트에서 로그인과 토큰 발급까지 자동화하려면 향후 별도 OAuth Authorization Server와 동적 클라이언트 등록 구성이 필요합니다.
+
+## Google Calendar 일정 및 알림
+
+사용자가 상단 Google Calendar 버튼에서 OAuth 연결을 완료하면 다음 규칙으로 동작합니다.
+
+1. 현재 계정 소유 회의의 미완료·비아카이브 업무를 조회합니다.
+2. PII 토큰을 현재 사용자 이름에 대해서만 복원한 뒤 담당자가 본인인지 검사합니다.
+3. 기한을 날짜 또는 날짜·시간으로 해석합니다.
+4. 시간 없는 기한은 종일 일정, 시간이 있는 기한은 기본 1시간 일정으로 생성합니다.
+5. 팝업과 이메일 알림을 기본 1일 전인 1,440분 전에 설정합니다.
+6. 동일 업무는 `google_calendar_event_links`로 식별해 중복 생성하지 않고 수정합니다.
+7. 업무 완료·대체·삭제·아카이브 시 연결된 Google 일정을 제거합니다.
+
+회의 분석, 업무 상태 변경, 일정 변경 확정과 아카이브 처리 후에는 자동 동기화를 시도합니다. Google API 장애가 발생해도 핵심 회의 저장이나 업무 변경은 롤백하지 않으며, 캘린더 동기화 실패만 로그로 남겨 다음 동기화에서 다시 맞춥니다.
+
 ## 저장소 구조
 
 ```text
@@ -118,17 +171,18 @@ LangGraph는 회의 Q&A의 Agentic RAG 흐름에만 사용합니다. 인증·권
 ├── app/
 │   ├── api/
 │   │   ├── deps.py                 # 인증·승인 사용자 의존성
-│   │   └── routes/                 # 인증, 사용자, 회의록 API
+│   │   └── routes/                 # 인증, 사용자, 회의록, Google Calendar API
 │   ├── core/
 │   │   ├── config.py               # 환경변수 설정
 │   │   ├── database.py             # SQLAlchemy 연결
 │   │   ├── prompts.py              # 요약·추출·RAG 프롬프트
 │   │   └── security.py             # JWT·비밀번호 처리
-│   ├── models/                     # 사용자·회의록·PII·업무·청크 모델
+│   ├── models/                     # 사용자·회의록·PII·업무·청크·캘린더 모델
 │   ├── repositories/               # 계정 소유권 필터가 적용된 DB 접근 계층
 │   ├── schemas/                    # API 요청·응답 스키마
-│   ├── services/                   # STT, 마스킹, 분석, 검색, 보고서
+│   ├── services/                   # STT, 마스킹, 분석, 검색, 캘린더, 보고서
 │   ├── static/                     # 브라우저 UI
+│   ├── mcp_server.py               # FastMCP 도구와 Noting JWT 검증
 │   └── main.py                     # FastAPI 진입점
 ├── data/
 │   └── templates/                  # 보고서 템플릿
@@ -138,6 +192,7 @@ LangGraph는 회의 Q&A의 Agentic RAG 흐름에만 사용합니다. 인증·권
 │   ├── migrate_transcript_archive.py # 회의·할 일 아카이브 증분 마이그레이션
 │   ├── migrate_transcript_titles.py # 자동·수동 회의 제목 증분 마이그레이션
 │   ├── migrate_user_identity_and_ownership.py # 실명·회의 소유권·PII 토큰 마이그레이션
+│   ├── migrate_google_calendar.py  # Google OAuth 연결·일정 링크 테이블
 │   └── seed_users.py                # 로컬 개발용 사용자 데이터
 ├── tests/                          # 단위 테스트
 ├── .env.example                    # 환경변수 예시
@@ -154,6 +209,7 @@ LangGraph는 회의 Q&A의 Agentic RAG 흐름에만 사용합니다. 인증·권
 - PostgreSQL 16 및 pgvector 확장
 - Ollama와 설정한 생성·임베딩 모델
 - 음성 인식을 사용할 경우 CLOVA Speech API 정보
+- Google Calendar 연동 시 Google Cloud OAuth 웹 클라이언트와 HTTPS 도메인
 
 ### 의존성 설치
 
@@ -177,6 +233,14 @@ uv sync
 | `OLLAMA_BASE_URL` | 아니요 | `http://localhost:11434` | Ollama API 주소 |
 | `CLOVA_SPEECH_INVOKE_URL` | 음성 사용 시 | 빈 값 | CLOVA Speech 호출 주소 |
 | `CLOVA_SPEECH_SECRET` | 음성 사용 시 | 빈 값 | CLOVA Speech API 키 |
+| `GOOGLE_CLIENT_ID` | 캘린더 사용 시 | 빈 값 | Google OAuth 웹 클라이언트 ID |
+| `GOOGLE_CLIENT_SECRET` | 캘린더 사용 시 | 빈 값 | Google OAuth 클라이언트 비밀 |
+| `GOOGLE_CALENDAR_REDIRECT_URI` | 캘린더 사용 시 | 빈 값 | Google OAuth 콜백 주소 |
+| `GOOGLE_CALENDAR_TIMEZONE` | 아니요 | `Asia/Seoul` | Google 일정 시간대 |
+| `GOOGLE_CALENDAR_REMINDER_MINUTES` | 아니요 | `1440` | 일정 사전 알림 시간 |
+| `TOKEN_ENCRYPTION_KEY` | 운영 시 권장 | `SECRET_KEY`에서 파생 | 저장된 Google 토큰 암호화 키 |
+| `MCP_ISSUER_URL` | MCP 외부 사용 시 | `http://localhost:8000` | MCP 토큰 발급자 식별 URL |
+| `MCP_RESOURCE_SERVER_URL` | MCP 외부 사용 시 | `http://localhost:8000/mcp` | MCP 리소스 서버 URL |
 
 예시:
 
@@ -193,7 +257,19 @@ OLLAMA_BASE_URL=http://localhost:11434
 
 CLOVA_SPEECH_INVOKE_URL=
 CLOVA_SPEECH_SECRET=
+
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_CALENDAR_REDIRECT_URI=https://your-domain.example/calendar/google/callback
+GOOGLE_CALENDAR_TIMEZONE=Asia/Seoul
+GOOGLE_CALENDAR_REMINDER_MINUTES=1440
+TOKEN_ENCRYPTION_KEY=replace-with-a-separate-long-random-value
+
+MCP_ISSUER_URL=https://your-domain.example
+MCP_RESOURCE_SERVER_URL=https://your-domain.example/mcp
 ```
+
+`TOKEN_ENCRYPTION_KEY`를 변경하면 기존에 저장한 Google OAuth 토큰을 복호화할 수 없으므로 해당 사용자는 Calendar를 다시 연결해야 합니다.
 
 ### 데이터베이스
 
@@ -213,6 +289,7 @@ uv run python scripts/migrate_transcript_titles.py
 uv run python scripts/migrate_analysis_jobs.py
 uv run python scripts/migrate_transcript_archive.py
 uv run python -m scripts.migrate_user_identity_and_ownership
+uv run python scripts/migrate_google_calendar.py
 ```
 
 로컬 개발용 사용자를 추가할 때:
@@ -242,8 +319,11 @@ uv run uvicorn app.main:app --reload
 - Web UI: `http://127.0.0.1:8000/ui/`
 - API 문서: `http://127.0.0.1:8000/docs`
 - Health check: `http://127.0.0.1:8000/health`
+- MCP endpoint: `http://127.0.0.1:8000/mcp/`
 
 브라우저 녹음은 보안 컨텍스트가 필요합니다. 로컬에서는 `localhost` 또는 `127.0.0.1`을 사용하고, 운영 환경에서는 HTTPS를 적용해야 합니다.
+
+Google Cloud Console에서는 Google Calendar API를 활성화하고 OAuth 클라이언트를 **웹 애플리케이션** 유형으로 생성합니다. 운영 리디렉션 URI는 `.env`와 동일한 `https://서비스도메인/calendar/google/callback`을 등록해야 합니다. 비밀값은 저장소에 커밋하지 않습니다.
 
 ## 주요 API
 
@@ -266,6 +346,14 @@ uv run uvicorn app.main:app --reload
 | `GET` | `/transcripts/{id}/schedule-change-candidates` | 일정 변경 후보 조회 |
 | `GET` | `/transcripts/{id}/pii` | 현재 계정 관리자용 PII 원문 조회 |
 | `GET` | `/transcripts/{id}/report.pdf` | PDF 보고서 다운로드 |
+| `GET` | `/calendar/google/status` | 현재 사용자의 Google Calendar 연결 상태 |
+| `GET` | `/calendar/google/connect` | Google OAuth 승인 URL 생성 |
+| `GET` | `/calendar/google/callback` | Google OAuth 콜백과 토큰 저장 |
+| `POST` | `/calendar/google/sync` | 본인 업무와 Google 일정 동기화 |
+| `GET` | `/calendar/google/events` | 동기화된 향후 Noting 일정 조회 |
+| `POST` | `/calendar/google/events` | 사용자 요청에 따른 수동 일정 생성 |
+| `DELETE` | `/calendar/google/disconnect` | Google 연결과 저장 토큰 제거 |
+| `POST` | `/mcp/` | MCP Streamable HTTP 메시지 처리 |
 
 세부 요청·응답 스키마는 실행 중인 서비스의 `/docs`에서 확인할 수 있습니다.
 
@@ -284,6 +372,16 @@ uv run --group dev pytest -q
 - 한국어 표현 변형과 RAG 재정렬
 - 근거 부족 판정
 - 업무 상태 값 검증
+- LangGraph Agentic RAG 노드 분기와 실행 trace
+- MCP 도구 등록 및 비인증 요청 차단
+- 한국어 기한 해석, Google 일정 본문과 하루 전 알림 생성
+- Google OAuth state 서명·검증
+
+현재 전체 자동 테스트 결과:
+
+```text
+73 passed
+```
 
 2026년 7월 23일 로컬 확장 평가 결과:
 
@@ -307,6 +405,8 @@ uv run --group dev pytest -q
 - 동기식 LLM·STT 작업의 비동기 작업 큐 전환 검토
 - 전체 스키마 마이그레이션과 롤백 절차 구축
 - 실제 회의록 기반 검색·마스킹·업무 추출 회귀 평가
+- Google OAuth 운영 승인, 테스트 사용자와 리디렉션 URI 점검
+- MCP 공개 연동 시 OAuth Authorization Server 구성
 - CI에서 단위·통합 테스트 자동 실행
 - 데이터 보존 기간과 PII 삭제 정책 수립
 
@@ -318,6 +418,9 @@ uv run --group dev pytest -q
 - 계정별 회의 소유권 검사는 애플리케이션 계층에 구현돼 있으며 DB 자체 RLS는 적용되지 않았습니다.
 - 초기 데이터베이스를 처음부터 생성하는 통합 마이그레이션은 아직 제공하지 않습니다.
 - 자동화된 브라우저 E2E 및 외부 STT 통합 테스트는 현재 테스트 범위에 포함되지 않습니다.
+- Google Calendar 연동에는 Google Cloud OAuth 설정, 사용자 동의와 HTTPS 도메인이 필요합니다.
+- 날짜가 불명확한 업무는 Noting에는 저장되지만 Google Calendar에는 자동 등록되지 않습니다.
+- MCP는 현재 Noting JWT 직접 전달 방식이며 범용 클라이언트용 OAuth 로그인 서버는 포함하지 않습니다.
 
 ## 개발 원칙
 

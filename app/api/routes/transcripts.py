@@ -28,6 +28,8 @@ from app.services import agentic_rag
 from app.services.analyzer import analyze, summarize
 from app.services.chunking import split_text
 from app.services.embedding import embed
+from app.services.errors import ExternalServiceError
+from app.services.google_calendar import get_connection, sync_user_tasks
 from app.services.masking import mask_text
 from app.services.personalization import (
     is_assigned_to_user,
@@ -79,6 +81,17 @@ ALLOWED_AUDIO_CONTENT_TYPES = {
     "video/mp4",
     "video/webm",
 }
+
+
+def sync_calendar_if_connected(db: Session, current_user: User) -> None:
+    if get_connection(db, current_user) is None:
+        return
+    try:
+        sync_user_tasks(db, current_user)
+    except ExternalServiceError:
+        logger.exception(
+            "Google Calendar sync failed for user %s", current_user.id
+        )
 
 
 def read_audio_upload(file: UploadFile) -> bytes:
@@ -353,6 +366,7 @@ def run_analysis_pipeline(db: Session, current_user: User, transcript: Transcrip
         embedding,
         indexed_chunks,
     )
+    sync_calendar_if_connected(db, current_user)
     saved_items = transcript_repo.get_action_items(db, current_user, transcript.id)
     pii_entries = transcript_repo.get_pii_entries(
         db, current_user, transcript.id
@@ -665,6 +679,7 @@ def archive_transcript(
     if transcript is None:
         raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
     archived = transcript_repo.archive_transcript(db, transcript)
+    sync_calendar_if_connected(db, current_user)
     return {
         "id": archived.id,
         "archived": archived.archived,
@@ -684,6 +699,7 @@ def restore_transcript(
     if transcript is None:
         raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
     restored = transcript_repo.restore_transcript(db, transcript)
+    sync_calendar_if_connected(db, current_user)
     return {"id": restored.id, "archived": restored.archived}
 
 
@@ -719,6 +735,7 @@ def update_task_status(
     updated = transcript_repo.update_action_item_status(
         db, action_item, ActionItemStatus(body.status)
     )
+    sync_calendar_if_connected(db, current_user)
     return {
         "id": updated.id,
         "transcript_id": updated.transcript_id,
@@ -739,6 +756,7 @@ def archive_task(
     if item is None:
         raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
     archived = transcript_repo.archive_action_item(db, item)
+    sync_calendar_if_connected(db, current_user)
     return {"id": archived.id, "archived": archived.archived}
 
 
@@ -755,6 +773,7 @@ def restore_task(
     if item is None:
         raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
     restored = transcript_repo.restore_action_item(db, item)
+    sync_calendar_if_connected(db, current_user)
     return {"id": restored.id, "archived": restored.archived}
 
 
@@ -774,6 +793,7 @@ def delete_task(
         transcript_repo.delete_archived_action_item(db, item)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    sync_calendar_if_connected(db, current_user)
     return Response(status_code=204)
 
 
@@ -956,6 +976,7 @@ def confirm_task_schedule_change(
     updated_previous = transcript_repo.confirm_schedule_change(
         db, previous_item, current_item
     )
+    sync_calendar_if_connected(db, current_user)
     return {
         "previous_task_id": updated_previous.id,
         "previous_due": updated_previous.due,

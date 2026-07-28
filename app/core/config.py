@@ -14,6 +14,14 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     clova_speech_invoke_url: str = ""
     clova_speech_secret: str = ""
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_calendar_redirect_uri: str = ""
+    google_calendar_timezone: str = "Asia/Seoul"
+    google_calendar_reminder_minutes: int = 1440
+    token_encryption_key: str = ""
+    mcp_issuer_url: str = "http://localhost:8000"
+    mcp_resource_server_url: str = "http://localhost:8000/mcp"
 
 
 settings = Settings()
