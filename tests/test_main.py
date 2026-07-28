@@ -46,6 +46,7 @@ class MainRouteTests(unittest.TestCase):
         self.assertIn("Agentic RAG 실행 과정", script.text)
         self.assertIn('fetch("/calendar/google/disconnect"', script.text)
         self.assertIn("async function logout(disconnectGoogle = true)", script.text)
+        self.assertNotIn("계정별 전용 캘린더 설정이 필요합니다.", script.text)
 
     def test_analysis_endpoint_uses_post(self):
         route = next(

@@ -218,19 +218,19 @@ function renderGoogleCalendarStatus() {
   $("google-calendar-dot")?.classList.toggle("active", ready);
   if (!$("calendar-status-title")) return;
   $("calendar-status-title").textContent = requiresReconnect
-    ? "계정별 전용 캘린더 설정이 필요합니다."
+    ? "Google Calendar 연결을 갱신해 주세요."
     : connected
       ? `${googleCalendarStatus.email || "Google 계정"}에 연결됨`
       : "Google Calendar를 연결하세요.";
   $("calendar-status-copy").textContent = requiresReconnect
-    ? "기존 연결을 계정 전용 캘린더 방식으로 전환하려면 Google 권한을 다시 승인해 주세요."
+    ? "기존 Google 연결 권한을 한 번 다시 승인하면 자동 동기화됩니다."
     : connected
       ? "본인에게 배정된 기한 업무를 계정 전용 캘린더에 동기화하고 일정 하루 전에 알림을 보냅니다."
     : googleCalendarStatus?.configured
       ? "Noting 업무를 Google Calendar 일정과 하루 전 알림으로 연결할 수 있습니다."
       : "서버에 Google OAuth 설정이 필요합니다.";
   $("calendar-connect-action").textContent = requiresReconnect
-    ? "전용 캘린더 설정"
+    ? "Google Calendar 다시 연결"
     : "Google Calendar 연결";
   $("calendar-connect-action").classList.toggle("hidden", ready);
   $("calendar-connect-action").disabled = !googleCalendarStatus?.configured;
@@ -240,17 +240,17 @@ function renderGoogleCalendarStatus() {
 async function loadGoogleCalendarStatus({ autoSync = false } = {}) {
   try {
     googleCalendarStatus = await (await api("/calendar/google/status")).json();
-    renderGoogleCalendarStatus();
     const syncKey = `noting_calendar_synced_${me?.username || "user"}`;
     if (
       autoSync
       && googleCalendarStatus.connected
-      && !googleCalendarStatus.requires_reconnect
       && !sessionStorage.getItem(syncKey)
     ) {
-      sessionStorage.setItem(syncKey, "1");
-      await syncGoogleCalendar(true);
+      const synced = await syncGoogleCalendar(true);
+      if (synced) sessionStorage.setItem(syncKey, "1");
+      googleCalendarStatus = await (await api("/calendar/google/status")).json();
     }
+    renderGoogleCalendarStatus();
   } catch (_) {
     googleCalendarStatus = { configured: false, connected: false };
     renderGoogleCalendarStatus();
@@ -287,8 +287,10 @@ async function syncGoogleCalendar(silent = false) {
     const message = `동기화 완료: 추가 ${data.created}개 · 수정 ${data.updated}개 · 정리 ${data.deleted}개`;
     if (!silent) setMessage("calendar-settings-message", message, "success");
     else showToast(message);
+    return true;
   } catch (error) {
     if (!silent) setMessage("calendar-settings-message", error.message, "error");
+    return false;
   } finally {
     if (button) button.disabled = false;
   }

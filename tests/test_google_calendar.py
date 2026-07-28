@@ -154,15 +154,47 @@ def test_create_dedicated_calendar_rejects_missing_id(monkeypatch):
     assert exc_info.value.status_code == 502
 
 
-def test_sync_rejects_legacy_primary_calendar(monkeypatch):
+def test_sync_automatically_prepares_legacy_primary_calendar(monkeypatch):
     connection = SimpleNamespace(calendar_id="primary")
     monkeypatch.setattr(gc, "get_connection", Mock(return_value=connection))
+    monkeypatch.setattr(gc, "get_access_token", Mock(return_value="access-token"))
+    create_calendar = Mock(
+        return_value="noting-user-7@group.calendar.google.com"
+    )
+    monkeypatch.setattr(gc, "_create_dedicated_calendar", create_calendar)
+    monkeypatch.setattr(gc, "_personal_sync_tasks", Mock(return_value=[]))
+    db = Mock()
+    links_query = Mock()
+    links_query.filter.return_value = links_query
+    links_query.all.return_value = []
+    db.query.return_value = links_query
+
+    result = gc.sync_user_tasks(db, SimpleNamespace(id=7))
+
+    assert result["calendar_id"] == "noting-user-7@group.calendar.google.com"
+    assert connection.calendar_id == "noting-user-7@group.calendar.google.com"
+    create_calendar.assert_called_once()
+
+
+def test_create_dedicated_calendar_requests_reconnect_when_scope_is_missing(
+    monkeypatch,
+):
+    request = httpx.Request("POST", f"{gc.GOOGLE_CALENDAR_API}/calendars")
+    response = httpx.Response(403, request=request)
+    google_response = Mock()
+    google_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "forbidden",
+        request=request,
+        response=response,
+    )
+    monkeypatch.setattr(gc.httpx, "post", Mock(return_value=google_response))
+    user = SimpleNamespace(username="acc_user", display_name="김철수")
 
     with pytest.raises(ExternalServiceError) as exc_info:
-        gc.sync_user_tasks(Mock(), SimpleNamespace(id=7))
+        gc._create_dedicated_calendar("access-token", user)
 
     assert exc_info.value.status_code == 409
-    assert "전용 Google 캘린더" in exc_info.value.detail
+    assert exc_info.value.detail == "Google Calendar 연결 권한을 갱신해 주세요."
 
 
 def test_inactive_connection_preserves_calendar_but_reports_disconnected(monkeypatch):

@@ -170,10 +170,19 @@ def _create_dedicated_calendar(access_token: str, user: User) -> str:
         )
         response.raise_for_status()
         calendar_id = str(response.json().get("id") or "").strip()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in {401, 403}:
+            raise ExternalServiceError(
+                "Google Calendar 연결 권한을 갱신해 주세요.",
+                status_code=409,
+            ) from exc
+        raise ExternalServiceError(
+            "Google Calendar API에서 캘린더 준비에 실패했습니다.",
+            status_code=502,
+        ) from exc
     except (httpx.HTTPError, ValueError) as exc:
         raise ExternalServiceError(
-            "Noting 계정 전용 Google 캘린더를 만들지 못했습니다. "
-            "Google 권한을 확인한 후 다시 연결해 주세요.",
+            "Google Calendar API에서 캘린더 준비에 실패했습니다.",
             status_code=502,
         ) from exc
     if not calendar_id:
@@ -182,6 +191,23 @@ def _create_dedicated_calendar(access_token: str, user: User) -> str:
             status_code=502,
         )
     return calendar_id
+
+
+def _ensure_dedicated_calendar(
+    db: Session,
+    connection: GoogleCalendarConnection,
+    user: User,
+) -> str:
+    selected_calendar = (connection.calendar_id or "").strip()
+    if selected_calendar and selected_calendar != "primary":
+        return selected_calendar
+
+    access_token = get_access_token(db, connection)
+    selected_calendar = _create_dedicated_calendar(access_token, user)
+    connection.calendar_id = selected_calendar
+    db.add(connection)
+    db.commit()
+    return selected_calendar
 
 
 def exchange_code(db: Session, code: str, state: str) -> GoogleCalendarConnection:
@@ -557,13 +583,7 @@ def sync_user_tasks(db: Session, user: User) -> dict:
             "Google Calendar가 연결되어 있지 않습니다.",
             status_code=409,
         )
-    selected_calendar = (connection.calendar_id or "").strip()
-    if not selected_calendar or selected_calendar == "primary":
-        raise ExternalServiceError(
-            "계정별 전용 Google 캘린더 설정이 필요합니다. "
-            "Google Calendar를 다시 연결해 주세요.",
-            status_code=409,
-        )
+    selected_calendar = _ensure_dedicated_calendar(db, connection, user)
     links = {
         link.action_item_id: link
         for link in db.query(GoogleCalendarEventLink)
@@ -697,6 +717,7 @@ def create_manual_event(
             "Google Calendar가 연결되어 있지 않습니다.",
             status_code=409,
         )
+    selected_calendar = _ensure_dedicated_calendar(db, connection, user)
     try:
         if all_day:
             start_date = date.fromisoformat(start)
@@ -722,7 +743,7 @@ def create_manual_event(
         db,
         connection,
         "POST",
-        f"/calendars/{quote(connection.calendar_id, safe='')}/events",
+        f"/calendars/{quote(selected_calendar, safe='')}/events",
         json_body=body,
     )
 
@@ -734,12 +755,13 @@ def list_upcoming_events(db: Session, user: User, days: int = 7) -> list[dict]:
             "Google Calendar가 연결되어 있지 않습니다.",
             status_code=409,
         )
+    selected_calendar = _ensure_dedicated_calendar(db, connection, user)
     now = datetime.now(timezone.utc)
     data = _calendar_request(
         db,
         connection,
         "GET",
-        f"/calendars/{quote(connection.calendar_id, safe='')}/events",
+        f"/calendars/{quote(selected_calendar, safe='')}/events",
         params={
             "timeMin": now.isoformat(),
             "timeMax": (now + timedelta(days=max(1, min(days, 90)))).isoformat(),
