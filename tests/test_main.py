@@ -21,6 +21,8 @@ class MainRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("아이디를 입력하세요", response.text)
+        self.assertIn("Noting에 로그인하세요.", response.text)
+        self.assertNotIn("다시 만나서 반가워요.", response.text)
         self.assertIn('/ui/styles.css', response.text)
         self.assertIn('/ui/app.js', response.text)
         self.assertIn("qa-dashboard", response.text)

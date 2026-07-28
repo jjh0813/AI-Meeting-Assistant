@@ -121,9 +121,9 @@ function showAuth(tab) {
   $("signup-pane").classList.toggle("hidden", loginMode);
   $("tab-login").classList.toggle("active", loginMode);
   $("tab-signup").classList.toggle("active", !loginMode);
-  $("auth-title").textContent = loginMode ? "다시 만나서 반가워요." : "팀 작업대를 요청하세요.";
+  $("auth-title").textContent = loginMode ? "Noting에 로그인하세요." : "팀 작업대를 요청하세요.";
   $("auth-subtitle").textContent = loginMode
-    ? "내 회의 작업대로 로그인하세요."
+    ? "내 회의와 업무를 안전하게 확인할 수 있습니다."
     : "관리자 승인 후 내 계정의 회의 작업대를 사용할 수 있습니다.";
   setRoute(loginMode ? "#/login" : "#/signup");
 }
