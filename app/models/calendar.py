@@ -22,6 +22,7 @@ class GoogleCalendarConnection(Base):
         unique=True,
         index=True,
     )
+    google_subject = Column(Text, nullable=True, index=True)
     google_email = Column(Text, nullable=True)
     calendar_id = Column(Text, nullable=False, default="primary")
     encrypted_access_token = Column(Text, nullable=False)

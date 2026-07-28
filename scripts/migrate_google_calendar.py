@@ -9,6 +9,7 @@ STATEMENTS = (
         id SERIAL PRIMARY KEY,
         user_id INTEGER NOT NULL UNIQUE
             REFERENCES users(id) ON DELETE CASCADE,
+        google_subject TEXT,
         google_email TEXT,
         calendar_id TEXT NOT NULL DEFAULT 'primary',
         encrypted_access_token TEXT NOT NULL,
@@ -22,6 +23,14 @@ STATEMENTS = (
     """
     CREATE INDEX IF NOT EXISTS ix_google_calendar_connections_user_id
     ON google_calendar_connections(user_id)
+    """,
+    """
+    ALTER TABLE google_calendar_connections
+    ADD COLUMN IF NOT EXISTS google_subject TEXT
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_google_calendar_connections_google_subject
+    ON google_calendar_connections(google_subject)
     """,
     """
     CREATE TABLE IF NOT EXISTS google_calendar_event_links (

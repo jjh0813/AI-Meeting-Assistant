@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_approved_user
 from app.core.database import get_db
 from app.models.user import User
-from app.schemas.calendar import CalendarEventCreate, CalendarSyncRequest
+from app.schemas.calendar import CalendarEventCreate
 from app.services.errors import ExternalServiceError
 from app.services.google_calendar import (
     build_authorization_url,
@@ -50,11 +50,10 @@ def google_calendar_callback(
 
 @router.post("/sync")
 def sync_google_calendar(
-    body: CalendarSyncRequest,
     current_user: User = Depends(get_approved_user),
     db: Session = Depends(get_db),
 ):
-    return sync_user_tasks(db, current_user, body.calendar_id)
+    return sync_user_tasks(db, current_user)
 
 
 @router.get("/events")

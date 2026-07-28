@@ -10,6 +10,7 @@ from urllib.parse import quote, urlencode
 import httpx
 import jwt
 from cryptography.fernet import Fernet, InvalidToken
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -24,12 +25,13 @@ logger = logging.getLogger(__name__)
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
-GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
+GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 GOOGLE_CALENDAR_API = "https://www.googleapis.com/calendar/v3"
 GOOGLE_SCOPES = (
     "openid",
     "email",
     "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.app.created",
 )
 KST = timezone(timedelta(hours=9), name="Asia/Seoul")
 _DATE_PATTERNS = (
@@ -122,7 +124,7 @@ def build_authorization_url(user: User) -> str:
         "scope": " ".join(GOOGLE_SCOPES),
         "access_type": "offline",
         "include_granted_scopes": "true",
-        "prompt": "consent",
+        "prompt": "select_account consent",
         "state": create_oauth_state(user),
     }
     return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
@@ -131,6 +133,55 @@ def build_authorization_url(user: User) -> str:
 def _token_expiry(token_data: dict) -> datetime:
     seconds = max(int(token_data.get("expires_in") or 3600), 60)
     return datetime.now(timezone.utc) + timedelta(seconds=seconds)
+
+
+def _same_google_account(
+    connection: GoogleCalendarConnection,
+    *,
+    google_subject: str | None,
+    google_email: str | None,
+) -> bool:
+    if connection.google_subject and google_subject:
+        return secrets.compare_digest(connection.google_subject, google_subject)
+    if connection.google_email and google_email:
+        return connection.google_email.casefold() == google_email.casefold()
+    return False
+
+
+def _dedicated_calendar_body(user: User) -> dict:
+    display_name = (user.display_name or user.username).strip()
+    return {
+        "summary": f"Noting - {display_name} ({user.username})",
+        "description": (
+            f"Noting 계정 {user.username} 전용 캘린더입니다. "
+            "이 계정에 배정된 업무 일정만 자동으로 동기화됩니다."
+        ),
+        "timeZone": settings.google_calendar_timezone,
+    }
+
+
+def _create_dedicated_calendar(access_token: str, user: User) -> str:
+    try:
+        response = httpx.post(
+            f"{GOOGLE_CALENDAR_API}/calendars",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json=_dedicated_calendar_body(user),
+            timeout=30,
+        )
+        response.raise_for_status()
+        calendar_id = str(response.json().get("id") or "").strip()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise ExternalServiceError(
+            "Noting 계정 전용 Google 캘린더를 만들지 못했습니다. "
+            "Google 권한을 확인한 후 다시 연결해 주세요.",
+            status_code=502,
+        ) from exc
+    if not calendar_id:
+        raise ExternalServiceError(
+            "Google이 생성된 전용 캘린더 ID를 반환하지 않았습니다.",
+            status_code=502,
+        )
+    return calendar_id
 
 
 def exchange_code(db: Session, code: str, state: str) -> GoogleCalendarConnection:
@@ -171,7 +222,7 @@ def exchange_code(db: Session, code: str, state: str) -> GoogleCalendarConnectio
         .first()
     )
     old_refresh = _decrypt(existing.encrypted_refresh_token) if existing else None
-    refresh_token = str(token_data.get("refresh_token") or "") or old_refresh
+    google_subject = None
     email = None
     try:
         info = httpx.get(
@@ -180,12 +231,34 @@ def exchange_code(db: Session, code: str, state: str) -> GoogleCalendarConnectio
             timeout=20,
         )
         if info.is_success:
-            email = info.json().get("email")
+            userinfo = info.json()
+            google_subject = userinfo.get("sub")
+            email = userinfo.get("email")
     except (httpx.HTTPError, ValueError):
         logger.info("Google userinfo lookup failed for user %s", user.id)
 
+    same_google_account = bool(
+        existing
+        and _same_google_account(
+            existing,
+            google_subject=google_subject,
+            google_email=email,
+        )
+    )
+    refresh_token = str(token_data.get("refresh_token") or "")
+    if not refresh_token and same_google_account:
+        refresh_token = old_refresh or ""
+
+    calendar_id = existing.calendar_id if existing and same_google_account else "primary"
+    if not calendar_id or calendar_id == "primary":
+        calendar_id = _create_dedicated_calendar(access_token, user)
+
     connection = existing or GoogleCalendarConnection(user_id=user.id)
+    connection.google_subject = google_subject or (
+        connection.google_subject if same_google_account else None
+    )
     connection.google_email = email or connection.google_email
+    connection.calendar_id = calendar_id
     connection.encrypted_access_token = _encrypt(access_token)
     connection.encrypted_refresh_token = _encrypt(refresh_token)
     connection.token_expires_at = _token_expiry(token_data)
@@ -206,9 +279,15 @@ def get_connection(db: Session, user: User) -> GoogleCalendarConnection | None:
 
 def connection_status(db: Session, user: User) -> dict:
     connection = get_connection(db, user)
+    requires_reconnect = bool(
+        connection
+        and (not connection.calendar_id or connection.calendar_id == "primary")
+    )
     return {
         "configured": calendar_is_configured(),
         "connected": connection is not None,
+        "isolated": connection is not None and not requires_reconnect,
+        "requires_reconnect": requires_reconnect,
         "email": connection.google_email if connection else None,
         "calendar_id": connection.calendar_id if connection else None,
         "reminder_minutes": settings.google_calendar_reminder_minutes,
@@ -448,17 +527,20 @@ def _personal_sync_tasks(db: Session, user: User):
     return results
 
 
-def sync_user_tasks(
-    db: Session, user: User, calendar_id: str | None = None
-) -> dict:
+def sync_user_tasks(db: Session, user: User) -> dict:
     connection = get_connection(db, user)
     if connection is None:
         raise ExternalServiceError(
             "Google Calendar가 연결되어 있지 않습니다.",
             status_code=409,
         )
-    selected_calendar = (calendar_id or connection.calendar_id or "primary").strip()
-    connection.calendar_id = selected_calendar
+    selected_calendar = (connection.calendar_id or "").strip()
+    if not selected_calendar or selected_calendar == "primary":
+        raise ExternalServiceError(
+            "계정별 전용 Google 캘린더 설정이 필요합니다. "
+            "Google Calendar를 다시 연결해 주세요.",
+            status_code=409,
+        )
     links = {
         link.action_item_id: link
         for link in db.query(GoogleCalendarEventLink)
@@ -661,9 +743,34 @@ def disconnect_calendar(db: Session, user: User) -> bool:
     connection = get_connection(db, user)
     if connection is None:
         return False
-    token = _decrypt(connection.encrypted_refresh_token) or _decrypt(
-        connection.encrypted_access_token
-    )
+
+    identity_filters = []
+    if connection.google_subject:
+        identity_filters.append(
+            GoogleCalendarConnection.google_subject == connection.google_subject
+        )
+    if connection.google_email:
+        identity_filters.append(
+            func.lower(GoogleCalendarConnection.google_email)
+            == connection.google_email.casefold()
+        )
+    shared_google_account = False
+    if identity_filters:
+        shared_google_account = (
+            db.query(GoogleCalendarConnection)
+            .filter(
+                GoogleCalendarConnection.id != connection.id,
+                or_(*identity_filters),
+            )
+            .first()
+            is not None
+        )
+
+    token = None
+    if not shared_google_account:
+        token = _decrypt(connection.encrypted_refresh_token) or _decrypt(
+            connection.encrypted_access_token
+        )
     if token:
         try:
             httpx.post(
