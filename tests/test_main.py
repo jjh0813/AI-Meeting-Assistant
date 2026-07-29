@@ -42,6 +42,8 @@ class MainRouteTests(unittest.TestCase):
         self.assertIn("startAutoAnalysis", script.text)
         self.assertIn("/analysis/start", script.text)
         self.assertIn("selectCalendarDate", script.text)
+        self.assertIn("openComposerForSelectedDate", script.text)
+        self.assertIn("meeting_date: composerMeetingDate", script.text)
         self.assertIn("formatApiErrorDetail", script.text)
         self.assertIn("string_too_short", script.text)
         self.assertNotIn("throw new Error(payload.detail)", script.text)

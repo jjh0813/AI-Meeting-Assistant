@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -5,6 +6,7 @@ from pydantic import BaseModel, Field
 
 class TranscriptCreate(BaseModel):
     content: str
+    meeting_date: date | None = None
 
 
 class TranscriptTitleUpdate(BaseModel):

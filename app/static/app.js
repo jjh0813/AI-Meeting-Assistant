@@ -6,6 +6,7 @@ let archivedTranscripts = [];
 let archivedTasks = [];
 let calendarCursor = new Date();
 let selectedCalendarDate = new Date();
+let composerMeetingDate = null;
 let currentTranscriptId = null;
 let currentPage = "workspace";
 let detailReturnPage = "workspace";
@@ -552,6 +553,13 @@ function dateKey(date) {
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 }
 
+function dateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function formatDate(value, withTime = false) {
   if (!value) return "등록일 미확인";
   const date = new Date(value);
@@ -1020,16 +1028,22 @@ async function deleteArchivedTask(transcriptId, taskId) {
   }
 }
 
-function openComposer() {
+function openComposer(meetingDate = null) {
+  composerMeetingDate = meetingDate;
   toggleSidebar(false);
   $("composer-modal").classList.remove("hidden");
   document.body.classList.add("modal-open");
   setTimeout(() => $("new-content").focus(), 40);
 }
 
+function openComposerForSelectedDate() {
+  openComposer(dateInputValue(selectedCalendarDate));
+}
+
 function closeComposer() {
   $("composer-modal").classList.add("hidden");
   document.body.classList.remove("modal-open");
+  composerMeetingDate = null;
 }
 
 function setComposerMode(mode) {
@@ -1053,7 +1067,7 @@ async function saveText() {
     const data = await (await api("/transcripts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, meeting_date: composerMeetingDate }),
     })).json();
     $("new-content").value = "";
     closeComposer();
@@ -1084,6 +1098,7 @@ async function uploadAudio(file) {
   setMessage("new-message", "음성을 텍스트로 변환하고 있습니다. 파일 길이에 따라 시간이 걸릴 수 있습니다.", "success");
   const body = new FormData();
   body.append("file", file, file.name);
+  if (composerMeetingDate) body.append("meeting_date", composerMeetingDate);
   try {
     const transcript = await (await api("/transcripts/upload", { method: "POST", body })).json();
     closeComposer();

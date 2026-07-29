@@ -1,4 +1,5 @@
 import logging
+from datetime import date
 from pathlib import Path
 
 from fastapi import (
@@ -6,6 +7,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     File,
+    Form,
     HTTPException,
     Response,
     UploadFile,
@@ -444,7 +446,11 @@ def create_transcript(
 ):
     masked_content, pii_items = mask_text(body.content)
     transcript = transcript_repo.create_transcript(
-        db, current_user, masked_content, pii_items
+        db,
+        current_user,
+        masked_content,
+        pii_items,
+        meeting_date=body.meeting_date,
     )
     return {
         **serialize_transcript(db, current_user, transcript),
@@ -1163,6 +1169,7 @@ def update_transcript(
 @router.post("/upload")
 def upload_and_transcribe(
     file: UploadFile = File(...),
+    meeting_date: date | None = Form(default=None),
     current_user: User = Depends(get_approved_user),
     db: Session = Depends(get_db),
 ):
@@ -1170,6 +1177,10 @@ def upload_and_transcribe(
     text = transcribe(audio_bytes, file.filename or "audio")
     masked_content, pii_items = mask_text(text)
     transcript = transcript_repo.create_transcript(
-        db, current_user, masked_content, pii_items
+        db,
+        current_user,
+        masked_content,
+        pii_items,
+        meeting_date=meeting_date,
     )
     return serialize_transcript(db, current_user, transcript)

@@ -1,3 +1,5 @@
+from datetime import date, datetime, time, timedelta, timezone
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -28,13 +30,25 @@ def deduplicate_analysis_tasks(tasks: list[dict]) -> list[dict]:
 
 
 def create_transcript(
-    db: Session, current_user: User, masked_content: str, pii_items: list[dict]
+    db: Session,
+    current_user: User,
+    masked_content: str,
+    pii_items: list[dict],
+    meeting_date: date | None = None,
 ) -> Transcript:
-    transcript = Transcript(
+    transcript_values = dict(
         owner_user_id=current_user.id,
         department=current_user.department,
         masked_content=masked_content,
     )
+    if meeting_date is not None:
+        kst = timezone(timedelta(hours=9))
+        transcript_values["created_at"] = datetime.combine(
+            meeting_date,
+            time(hour=12),
+            tzinfo=kst,
+        ).astimezone(timezone.utc)
+    transcript = Transcript(**transcript_values)
     db.add(transcript)
     db.flush()
     for item in pii_items:
