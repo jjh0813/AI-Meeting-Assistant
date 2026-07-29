@@ -591,7 +591,7 @@ def sync_user_tasks(db: Session, user: User) -> dict:
         .all()
     }
     active_ids = set()
-    created = updated = deleted = 0
+    created = updated = deleted = delete_failed = 0
     for item, transcript, pii_entries, due, parsed in _personal_sync_tasks(db, user):
         active_ids.add(item.id)
         title = personalize_masked_text(
@@ -689,6 +689,8 @@ def sync_user_tasks(db: Session, user: User) -> dict:
             )
         except ExternalServiceError:
             logger.warning("Failed to delete stale Google event %s", link.google_event_id)
+            delete_failed += 1
+            continue
         db.delete(link)
         deleted += 1
     db.commit()
@@ -696,6 +698,7 @@ def sync_user_tasks(db: Session, user: User) -> dict:
         "created": created,
         "updated": updated,
         "deleted": deleted,
+        "delete_failed": delete_failed,
         "calendar_id": selected_calendar,
         "reminder_minutes": settings.google_calendar_reminder_minutes,
     }

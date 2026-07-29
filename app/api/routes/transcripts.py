@@ -83,15 +83,18 @@ ALLOWED_AUDIO_CONTENT_TYPES = {
 }
 
 
-def sync_calendar_if_connected(db: Session, current_user: User) -> None:
+def sync_calendar_if_connected(
+    db: Session, current_user: User
+) -> dict | None:
     if get_connection(db, current_user) is None:
-        return
+        return None
     try:
-        sync_user_tasks(db, current_user)
+        return sync_user_tasks(db, current_user)
     except ExternalServiceError:
         logger.exception(
             "Google Calendar sync failed for user %s", current_user.id
         )
+        return {"sync_failed": True}
 
 
 def read_audio_upload(file: UploadFile) -> bytes:
@@ -744,11 +747,20 @@ def update_task_status(
     updated = transcript_repo.update_action_item_status(
         db, action_item, ActionItemStatus(body.status)
     )
-    sync_calendar_if_connected(db, current_user)
+    calendar_sync = sync_calendar_if_connected(db, current_user)
     return {
         "id": updated.id,
         "transcript_id": updated.transcript_id,
         "status": updated.status.value,
+        "calendar_event_deleted": bool(
+            calendar_sync and calendar_sync.get("deleted", 0)
+        ),
+        "calendar_event_delete_failed": bool(
+            calendar_sync and calendar_sync.get("delete_failed", 0)
+        ),
+        "calendar_sync_failed": bool(
+            calendar_sync and calendar_sync.get("sync_failed")
+        ),
     }
 
 

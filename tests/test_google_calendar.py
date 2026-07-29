@@ -267,3 +267,66 @@ def test_disconnect_revokes_when_google_account_is_not_shared(monkeypatch):
     assert revoke.call_args.args[0] == gc.GOOGLE_REVOKE_URL
     assert connection.encrypted_access_token is None
     assert connection.encrypted_refresh_token is None
+
+
+def test_sync_deletes_event_link_for_completed_or_inactive_task(monkeypatch):
+    connection = SimpleNamespace(
+        calendar_id="noting-user-7@group.calendar.google.com"
+    )
+    link = SimpleNamespace(
+        action_item_id=31,
+        calendar_id=connection.calendar_id,
+        google_event_id="google-event-31",
+    )
+    monkeypatch.setattr(gc, "get_connection", Mock(return_value=connection))
+    monkeypatch.setattr(
+        gc, "_ensure_dedicated_calendar", Mock(return_value=connection.calendar_id)
+    )
+    monkeypatch.setattr(gc, "_personal_sync_tasks", Mock(return_value=[]))
+    request = Mock(return_value={})
+    monkeypatch.setattr(gc, "_calendar_request", request)
+    db = Mock()
+    links_query = Mock()
+    links_query.filter.return_value = links_query
+    links_query.all.return_value = [link]
+    db.query.return_value = links_query
+
+    result = gc.sync_user_tasks(db, SimpleNamespace(id=7))
+
+    assert result["deleted"] == 1
+    assert result["delete_failed"] == 0
+    assert request.call_args.args[2] == "DELETE"
+    assert "google-event-31" in request.call_args.args[3]
+    db.delete.assert_called_once_with(link)
+
+
+def test_sync_keeps_event_link_when_google_delete_fails(monkeypatch):
+    connection = SimpleNamespace(
+        calendar_id="noting-user-7@group.calendar.google.com"
+    )
+    link = SimpleNamespace(
+        action_item_id=31,
+        calendar_id=connection.calendar_id,
+        google_event_id="google-event-31",
+    )
+    monkeypatch.setattr(gc, "get_connection", Mock(return_value=connection))
+    monkeypatch.setattr(
+        gc, "_ensure_dedicated_calendar", Mock(return_value=connection.calendar_id)
+    )
+    monkeypatch.setattr(gc, "_personal_sync_tasks", Mock(return_value=[]))
+    monkeypatch.setattr(
+        gc,
+        "_calendar_request",
+        Mock(side_effect=ExternalServiceError("Google 삭제 실패", status_code=502)),
+    )
+    db = Mock()
+    links_query = Mock()
+    links_query.filter.return_value = links_query
+    links_query.all.return_value = [link]
+    db.query.return_value = links_query
+
+    result = gc.sync_user_tasks(db, SimpleNamespace(id=7))
+
+    assert result["deleted"] == 0
+    assert result["delete_failed"] == 1
+    db.delete.assert_not_called()

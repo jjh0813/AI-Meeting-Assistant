@@ -1355,15 +1355,26 @@ async function saveTitle() {
 async function updateTaskStatus(transcriptId, taskId, status, reopen = false) {
   const scrollY = window.scrollY;
   try {
-    await api(`/transcripts/${transcriptId}/tasks/${taskId}`, {
+    const response = await api(`/transcripts/${transcriptId}/tasks/${taskId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     });
+    const result = await response.json();
     await refreshDashboard();
     if (reopen && currentTranscriptId === transcriptId) await openTranscript(transcriptId);
     else if (currentPage === "tasks") renderTasksPage();
     window.scrollTo({ top: scrollY });
+    if (status === "완료" && result.calendar_event_deleted) {
+      showToast("할 일을 완료했고 Google Calendar 일정도 삭제했습니다.");
+    } else if (
+      status === "완료"
+      && (result.calendar_event_delete_failed || result.calendar_sync_failed)
+    ) {
+      showToast("할 일은 완료했습니다. Google 일정은 다음 동기화 때 다시 삭제합니다.", "error");
+    } else if (status === "완료") {
+      showToast("할 일을 완료했습니다.");
+    }
   } catch (error) {
     showToast(error.message, "error");
   }
