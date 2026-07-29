@@ -105,10 +105,10 @@ const SUMMARY_FIELDS = {
   "주제": "topic",
   "일시": "meetingDatetime",
   "참석자": "participants",
-  "회의 목적": "purpose",
-  "핵심 논의": "keyPoints",
-  "결정 사항": "decisions",
-  "미결 사항": "unresolvedItems",
+  "회의목적": "purpose",
+  "핵심논의": "keyPoints",
+  "결정사항": "decisions",
+  "미결사항": "unresolvedItems",
 };
 
 function parseStructuredSummary(value, fallbackTitle = "") {
@@ -129,22 +129,28 @@ function parseStructuredSummary(value, fallbackTitle = "") {
     if (!line) continue;
     const fieldMatch = line.match(/^(주제|일시|참석자|회의\s*목적|핵심\s*논의|결정\s*사항|미결\s*사항)\s*:\s*(.*)$/);
     if (fieldMatch) {
-      const normalizedLabel = fieldMatch[1].replace(/\s+/g, " ");
+      const normalizedLabel = fieldMatch[1].replace(/\s+/g, "");
       const key = SUMMARY_FIELDS[normalizedLabel];
       const content = fieldMatch[2].trim();
       result.structured = true;
       currentList = ["keyPoints", "decisions", "unresolvedItems"].includes(key) ? key : null;
+      if (currentList && !Array.isArray(result[currentList])) result[currentList] = [];
       if (currentList && content) result[currentList].push(content.replace(/^[-•]\s*/, ""));
       else if (key) result[key] = content;
       continue;
     }
-    if (currentList) result[currentList].push(line.replace(/^[-•]\s*/, ""));
+    if (currentList) {
+      if (!Array.isArray(result[currentList])) result[currentList] = [];
+      result[currentList].push(line.replace(/^[-•]\s*/, ""));
+    }
   }
   return result;
 }
 
 function usefulSummaryItems(items) {
-  return (items || []).filter(item => item && item !== "언급 없음");
+  return (Array.isArray(items) ? items : []).filter(
+    item => item && item !== "언급 없음",
+  );
 }
 
 function summaryPreview(value, fallbackTitle = "") {

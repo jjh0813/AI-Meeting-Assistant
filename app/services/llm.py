@@ -4,10 +4,16 @@ from app.core.config import settings
 from app.services.errors import ExternalServiceError
 
 
-def call_llm(prompt: str, json_mode: bool = False) -> str:
+def call_llm(
+    prompt: str,
+    json_mode: bool = False,
+    json_schema: dict | None = None,
+) -> str:
     url = settings.ollama_base_url + "/api/generate"
     body = {"model": settings.llm_model, "prompt": prompt, "stream": False}
-    if json_mode:
+    if json_schema is not None:
+        body["format"] = json_schema
+    elif json_mode:
         body["format"] = "json"
     try:
         response = httpx.post(url, json=body, timeout=120)

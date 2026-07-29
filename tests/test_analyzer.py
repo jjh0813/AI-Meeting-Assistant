@@ -24,6 +24,32 @@ class AnalyzerTests(unittest.TestCase):
         self.assertEqual(result["title"], "서비스 배포 일정 확정")
         self.assertEqual(result["tasks"][0]["task"], "배포")
 
+    @patch("app.services.analyzer.call_llm")
+    def test_structured_summary_object_is_normalized(self, call_llm):
+        call_llm.return_value = (
+            '{"title":"베타 서비스 착수 회의",'
+            '"summary":{'
+            '"topic":"베타 서비스 착수",'
+            '"meeting_datetime":"2026년 8월 3일 오전 10시",'
+            '"participants":["김철수","박영희"],'
+            '"purpose":"베타 범위와 일정을 확정합니다.",'
+            '"key_points":["배포 기준을 논의했습니다."],'
+            '"decisions":["8월 14일에 배포합니다."],'
+            '"unresolved_items":["롤백 기준은 추가 논의합니다."]},'
+            '"tasks":[{"task":"부하 테스트","assignee":"김철수",'
+            '"due":"8월 6일 오후 2시","request":null}]}'
+        )
+
+        result = analyze("회의 내용")
+
+        self.assertIn("참석자: 김철수, 박영희", result["summary"])
+        self.assertIn("결정 사항:\n- 8월 14일에 배포합니다.", result["summary"])
+        self.assertEqual(result["tasks"][0]["request"], "")
+        self.assertIsInstance(
+            call_llm.call_args.kwargs["json_schema"],
+            dict,
+        )
+
     @patch("app.services.analyzer.call_llm", return_value="not-json")
     def test_invalid_json_raises_without_returning_empty_analysis(self, _):
         with self.assertRaises(ExternalServiceError):
