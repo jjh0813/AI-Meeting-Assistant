@@ -183,7 +183,9 @@ def stored_analysis(db: Session, current_user: User, transcript_id: int):
         )
     items = transcript_repo.get_action_items(db, current_user, transcript_id)
     pii_entries = transcript_repo.get_pii_entries(db, current_user, transcript_id)
+    department = getattr(transcript, "department", None)
     return transcript, {
+        "id": transcript.id,
         "title": personalize_masked_text(
             transcript.title or f"회의록 #{transcript.id}",
             pii_entries,
@@ -196,6 +198,13 @@ def stored_analysis(db: Session, current_user: User, transcript_id: int):
             serialize_action_item(item, pii_entries, current_user)
             for item in items
         ],
+        "department": getattr(department, "value", department) or "",
+        "created_at": getattr(transcript, "created_at", None),
+        "masked_content": personalize_masked_text(
+            getattr(transcript, "masked_content", "") or "",
+            pii_entries,
+            current_user.display_name,
+        ),
     }
 
 

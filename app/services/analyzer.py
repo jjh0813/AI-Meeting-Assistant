@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from app.core.prompts import ANALYSIS_PROMPT, SUMMARY_PROMPT
 from app.services.errors import ExternalServiceError
 from app.services.llm import call_llm
+from app.services.meeting_summary import format_structured_summary
 
 
 class AnalysisTask(BaseModel):
@@ -26,7 +27,8 @@ class AnalysisResult(BaseModel):
 
 def summarize(masked_text: str) -> str:
     prompt = SUMMARY_PROMPT.format(content=masked_text)
-    return call_llm(prompt)
+    raw_summary = call_llm(prompt)
+    return format_structured_summary("", raw_summary)
 
 
 def analyze(masked_text: str) -> dict:
@@ -40,4 +42,8 @@ def analyze(masked_text: str) -> dict:
             "AI 분석 결과 형식이 올바르지 않습니다. 기존 분석은 유지되며 다시 시도할 수 있습니다.",
             status_code=502,
         ) from exc
-    return result.model_dump()
+    normalized = result.model_dump()
+    normalized["summary"] = format_structured_summary(
+        normalized["title"], normalized["summary"]
+    )
+    return normalized

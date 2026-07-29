@@ -17,7 +17,10 @@ class AnalyzerTests(unittest.TestCase):
 
         result = analyze("회의 내용")
 
-        self.assertEqual(result["summary"], "배포 일정을 확정했다.")
+        self.assertIn("주제:", result["summary"])
+        self.assertIn("핵심 논의:", result["summary"])
+        self.assertIn("결정 사항:", result["summary"])
+        self.assertIn("미결 사항:", result["summary"])
         self.assertEqual(result["title"], "서비스 배포 일정 확정")
         self.assertEqual(result["tasks"][0]["task"], "배포")
 

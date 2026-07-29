@@ -101,6 +101,92 @@ function renderMarkdown(value) {
   return out.join("");
 }
 
+const SUMMARY_FIELDS = {
+  "주제": "topic",
+  "일시": "meetingDatetime",
+  "참석자": "participants",
+  "회의 목적": "purpose",
+  "핵심 논의": "keyPoints",
+  "결정 사항": "decisions",
+  "미결 사항": "unresolvedItems",
+};
+
+function parseStructuredSummary(value, fallbackTitle = "") {
+  const result = {
+    topic: fallbackTitle,
+    meetingDatetime: "",
+    participants: "",
+    purpose: "",
+    keyPoints: [],
+    decisions: [],
+    unresolvedItems: [],
+    structured: false,
+    raw: String(value || "").trim(),
+  };
+  let currentList = null;
+  for (const rawLine of result.raw.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const fieldMatch = line.match(/^(주제|일시|참석자|회의\s*목적|핵심\s*논의|결정\s*사항|미결\s*사항)\s*:\s*(.*)$/);
+    if (fieldMatch) {
+      const normalizedLabel = fieldMatch[1].replace(/\s+/g, " ");
+      const key = SUMMARY_FIELDS[normalizedLabel];
+      const content = fieldMatch[2].trim();
+      result.structured = true;
+      currentList = ["keyPoints", "decisions", "unresolvedItems"].includes(key) ? key : null;
+      if (currentList && content) result[currentList].push(content.replace(/^[-•]\s*/, ""));
+      else if (key) result[key] = content;
+      continue;
+    }
+    if (currentList) result[currentList].push(line.replace(/^[-•]\s*/, ""));
+  }
+  return result;
+}
+
+function usefulSummaryItems(items) {
+  return (items || []).filter(item => item && item !== "언급 없음");
+}
+
+function summaryPreview(value, fallbackTitle = "") {
+  const parsed = parseStructuredSummary(value, fallbackTitle);
+  if (!parsed.structured) return parsed.raw;
+  return usefulSummaryItems(parsed.keyPoints)[0]
+    || (parsed.purpose !== "언급 없음" ? parsed.purpose : "")
+    || parsed.topic
+    || parsed.raw;
+}
+
+function renderSummaryList(title, items, emptyText) {
+  const values = usefulSummaryItems(items);
+  return `
+    <section class="summary-block">
+      <h4>${escapeHtml(title)}</h4>
+      ${values.length
+        ? `<ul>${values.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+        : `<p class="summary-empty">${escapeHtml(emptyText)}</p>`}
+    </section>
+  `;
+}
+
+function renderStructuredSummary(value, fallbackTitle = "") {
+  const parsed = parseStructuredSummary(value, fallbackTitle);
+  if (!parsed.structured) {
+    return `<p class="summary-legacy">${escapeHtml(parsed.raw || "저장된 요약이 없습니다.")}</p>`;
+  }
+  const scalar = text => text && text !== "언급 없음" ? text : "언급 없음";
+  return `
+    <div class="summary-facts">
+      <div><span>주제</span><strong>${escapeHtml(scalar(parsed.topic))}</strong></div>
+      <div><span>일시</span><strong>${escapeHtml(scalar(parsed.meetingDatetime))}</strong></div>
+      <div><span>참석자</span><strong>${escapeHtml(scalar(parsed.participants))}</strong></div>
+      <div class="summary-purpose"><span>회의 목적</span><strong>${escapeHtml(scalar(parsed.purpose))}</strong></div>
+    </div>
+    ${renderSummaryList("핵심 논의", parsed.keyPoints, "핵심 논의가 기록되지 않았습니다.")}
+    ${renderSummaryList("결정 사항", parsed.decisions, "확정된 결정 사항이 없습니다.")}
+    ${renderSummaryList("미결 사항", parsed.unresolvedItems, "추가로 논의할 미결 사항이 없습니다.")}
+  `;
+}
+
 function showToast(message, type = "") {
   const toast = document.createElement("div");
   toast.className = `toast ${type}`.trim();
@@ -621,7 +707,7 @@ function renderDateMeetings() {
     return `
       <button class="meeting-row" type="button" onclick="openTranscript(${item.id})">
         <span class="meeting-row-date">${escapeHtml(formatDate(item.created_at))}<br />${escapeHtml(item.department)}</span>
-        <span><b class="meeting-row-title">${escapeHtml(item.title || `회의록 #${item.id}`)}</b><small class="meeting-row-summary">${escapeHtml(item.summary || item.masked_content || "회의 내용을 확인하세요.")}</small></span>
+        <span><b class="meeting-row-title">${escapeHtml(item.title || `회의록 #${item.id}`)}</b><small class="meeting-row-summary">${escapeHtml(summaryPreview(item.summary, item.title) || item.masked_content || "회의 내용을 확인하세요.")}</small></span>
         <span class="analysis-tag ${status}">${escapeHtml(analysisLabel(status))}</span>
       </button>
     `;
@@ -731,7 +817,7 @@ function renderAllMeetings() {
     return `
       <article class="meeting-card paper-panel">
         <div class="meeting-card-top"><span class="meeting-group"><i></i>${escapeHtml(item.department)}</span><span class="analysis-tag ${itemStatus}">${escapeHtml(analysisLabel(itemStatus))}</span></div>
-        <button class="meeting-card-open" type="button" onclick="openTranscript(${item.id})"><h2>${escapeHtml(item.title || `회의록 #${item.id}`)}</h2><p>${escapeHtml(item.summary || item.masked_content || "회의 내용을 확인하세요.")}</p></button>
+        <button class="meeting-card-open" type="button" onclick="openTranscript(${item.id})"><h2>${escapeHtml(item.title || `회의록 #${item.id}`)}</h2><p>${escapeHtml(summaryPreview(item.summary, item.title) || item.masked_content || "회의 내용을 확인하세요.")}</p></button>
         <div class="meeting-card-foot"><span>${escapeHtml(formatDate(item.created_at, true))}</span><div><button type="button" onclick="archiveTranscript(${item.id})">보관</button><button type="button" onclick="openTranscript(${item.id})">회의 열기 →</button></div></div>
       </article>
     `;
@@ -831,7 +917,7 @@ function renderArchive() {
   box.innerHTML = filtered.map(item => item.archiveType === "meeting" ? `
     <article class="archive-card paper-panel">
       <span class="archive-icon">▱</span>
-      <div><span class="label-caps">MEETING</span><h2>${escapeHtml(item.title || `회의록 #${item.id}`)}</h2><p>${escapeHtml(item.summary || "저장된 요약이 없습니다.")}</p><small>보관일 ${escapeHtml(formatDate(item.archived_at, true))} · 할 일 ${item.task_count || 0}개</small></div>
+      <div><span class="label-caps">MEETING</span><h2>${escapeHtml(item.title || `회의록 #${item.id}`)}</h2><p>${escapeHtml(summaryPreview(item.summary, item.title) || "저장된 요약이 없습니다.")}</p><small>보관일 ${escapeHtml(formatDate(item.archived_at, true))} · 할 일 ${item.task_count || 0}개</small></div>
       <div class="archive-actions"><button class="button ghost compact" type="button" onclick="restoreTranscript(${item.id})">복구</button><button class="delete-button" type="button" onclick="deleteArchivedTranscript(${item.id})">영구 삭제</button></div>
     </article>
   ` : `
@@ -1121,7 +1207,10 @@ function renderMeetingDetail(data, scheduleData = { change_candidates: [] }) {
   state.textContent = analysisLabel(status);
   state.className = `status-pill ${status === "completed" ? "" : status}`.trim();
   if (status === "completed" && data.summary) {
-    $("detail-summary").textContent = data.summary;
+    $("detail-summary").innerHTML = renderStructuredSummary(
+      data.summary,
+      data.title || `회의록 #${data.id}`,
+    );
   } else if (status === "failed") {
     $("detail-summary").innerHTML = `<div class="analysis-error">자동 분석에 실패했습니다.<br />${escapeHtml(data.analysis_error || "LLM 서버 상태를 확인한 뒤 다시 시도해 주세요.")}</div><button class="button ghost compact" style="margin-top:10px" type="button" onclick="startAutoAnalysis(${data.id})">분석 다시 시도</button>`;
   } else {
