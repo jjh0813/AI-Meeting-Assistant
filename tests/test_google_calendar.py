@@ -163,6 +163,7 @@ def test_sync_automatically_prepares_legacy_primary_calendar(monkeypatch):
     )
     monkeypatch.setattr(gc, "_create_dedicated_calendar", create_calendar)
     monkeypatch.setattr(gc, "_personal_sync_tasks", Mock(return_value=[]))
+    monkeypatch.setattr(gc, "_list_managed_events", Mock(return_value={}))
     db = Mock()
     links_query = Mock()
     links_query.filter.return_value = links_query
@@ -283,6 +284,22 @@ def test_sync_deletes_event_link_for_completed_or_inactive_task(monkeypatch):
         gc, "_ensure_dedicated_calendar", Mock(return_value=connection.calendar_id)
     )
     monkeypatch.setattr(gc, "_personal_sync_tasks", Mock(return_value=[]))
+    monkeypatch.setattr(
+        gc,
+        "_list_managed_events",
+        Mock(
+            return_value={
+                31: [
+                    {
+                        "id": "google-event-31",
+                        "extendedProperties": {
+                            "private": {"notingActionItemId": "31"}
+                        },
+                    }
+                ]
+            }
+        ),
+    )
     request = Mock(return_value={})
     monkeypatch.setattr(gc, "_calendar_request", request)
     db = Mock()
@@ -316,6 +333,22 @@ def test_sync_keeps_event_link_when_google_delete_fails(monkeypatch):
     monkeypatch.setattr(gc, "_personal_sync_tasks", Mock(return_value=[]))
     monkeypatch.setattr(
         gc,
+        "_list_managed_events",
+        Mock(
+            return_value={
+                31: [
+                    {
+                        "id": "google-event-31",
+                        "extendedProperties": {
+                            "private": {"notingActionItemId": "31"}
+                        },
+                    }
+                ]
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        gc,
         "_calendar_request",
         Mock(side_effect=ExternalServiceError("Google 삭제 실패", status_code=502)),
     )
@@ -330,3 +363,107 @@ def test_sync_keeps_event_link_when_google_delete_fails(monkeypatch):
     assert result["deleted"] == 0
     assert result["delete_failed"] == 1
     db.delete.assert_not_called()
+
+
+def test_sync_repairs_missing_google_event_instead_of_skipping(monkeypatch):
+    calendar_id = "noting-user-7@group.calendar.google.com"
+    connection = SimpleNamespace(calendar_id=calendar_id)
+    link = SimpleNamespace(
+        action_item_id=31,
+        calendar_id=calendar_id,
+        google_event_id="deleted-google-event",
+        due_snapshot="2026-08-06",
+        title_snapshot="상태 점검",
+        synced_at=None,
+    )
+    item = SimpleNamespace(id=31, task="상태 점검", request="")
+    transcript = SimpleNamespace(id=4, title="운영 회의")
+    parsed = gc.ParsedDue(
+        start=date(2026, 8, 6),
+        end=date(2026, 8, 7),
+        all_day=True,
+    )
+    monkeypatch.setattr(gc, "get_connection", Mock(return_value=connection))
+    monkeypatch.setattr(
+        gc, "_ensure_dedicated_calendar", Mock(return_value=calendar_id)
+    )
+    monkeypatch.setattr(
+        gc,
+        "_personal_sync_tasks",
+        Mock(return_value=[(item, transcript, [], "2026-08-06", parsed)]),
+    )
+    monkeypatch.setattr(gc, "_list_managed_events", Mock(return_value={}))
+    request = Mock(return_value={"id": "recreated-google-event"})
+    monkeypatch.setattr(gc, "_calendar_request", request)
+    db = Mock()
+    links_query = Mock()
+    links_query.filter.return_value = links_query
+    links_query.all.return_value = [link]
+    db.query.return_value = links_query
+
+    result = gc.sync_user_tasks(
+        db,
+        SimpleNamespace(id=7, display_name="김철수"),
+    )
+
+    assert result["created"] == 1
+    assert link.google_event_id == "recreated-google-event"
+    assert request.call_args.args[2] == "POST"
+
+
+def test_sync_removes_duplicate_google_events_and_keeps_linked_event(monkeypatch):
+    calendar_id = "noting-user-7@group.calendar.google.com"
+    connection = SimpleNamespace(calendar_id=calendar_id)
+    link = SimpleNamespace(
+        action_item_id=31,
+        calendar_id=calendar_id,
+        google_event_id="keeper-event",
+        due_snapshot="2026-08-06",
+        title_snapshot="상태 점검",
+        synced_at=None,
+    )
+    item = SimpleNamespace(id=31, task="상태 점검", request="")
+    transcript = SimpleNamespace(id=4, title="운영 회의")
+    parsed = gc.ParsedDue(
+        start=date(2026, 8, 6),
+        end=date(2026, 8, 7),
+        all_day=True,
+    )
+    monkeypatch.setattr(gc, "get_connection", Mock(return_value=connection))
+    monkeypatch.setattr(
+        gc, "_ensure_dedicated_calendar", Mock(return_value=calendar_id)
+    )
+    monkeypatch.setattr(
+        gc,
+        "_personal_sync_tasks",
+        Mock(return_value=[(item, transcript, [], "2026-08-06", parsed)]),
+    )
+    monkeypatch.setattr(
+        gc,
+        "_list_managed_events",
+        Mock(
+            return_value={
+                31: [
+                    {"id": "duplicate-event"},
+                    {"id": "keeper-event"},
+                ]
+            }
+        ),
+    )
+    request = Mock(return_value={})
+    monkeypatch.setattr(gc, "_calendar_request", request)
+    db = Mock()
+    links_query = Mock()
+    links_query.filter.return_value = links_query
+    links_query.all.return_value = [link]
+    db.query.return_value = links_query
+
+    result = gc.sync_user_tasks(
+        db,
+        SimpleNamespace(id=7, display_name="김철수"),
+    )
+
+    assert result["created"] == 0
+    assert result["duplicates_removed"] == 1
+    assert request.call_args.args[2] == "DELETE"
+    assert "duplicate-event" in request.call_args.args[3]

@@ -12,6 +12,7 @@ let detailReturnPage = "workspace";
 let analysisPollId = null;
 let clockTimerId = null;
 let googleCalendarStatus = null;
+let googleCalendarSyncPromise = null;
 let recorder = {
   stream: null,
   context: null,
@@ -370,13 +371,24 @@ async function connectGoogleCalendar() {
 }
 
 async function syncGoogleCalendar(silent = false) {
+  if (googleCalendarSyncPromise) return googleCalendarSyncPromise;
+  googleCalendarSyncPromise = performGoogleCalendarSync(silent);
+  try {
+    return await googleCalendarSyncPromise;
+  } finally {
+    googleCalendarSyncPromise = null;
+  }
+}
+
+async function performGoogleCalendarSync(silent = false) {
   const button = $("calendar-sync-button");
   if (button) button.disabled = true;
   try {
     const data = await (await api("/calendar/google/sync", {
       method: "POST",
     })).json();
-    const message = `동기화 완료: 추가 ${data.created}개 · 수정 ${data.updated}개 · 정리 ${data.deleted}개`;
+    const cleaned = data.deleted + (data.duplicates_removed || 0);
+    const message = `동기화 완료: 추가 ${data.created}개 · 수정 ${data.updated}개 · 정리 ${cleaned}개`;
     if (!silent) setMessage("calendar-settings-message", message, "success");
     else showToast(message);
     return true;

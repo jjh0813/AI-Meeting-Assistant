@@ -11,6 +11,22 @@ from app.models.transcript import (
 from app.models.user import User
 
 
+def deduplicate_analysis_tasks(tasks: list[dict]) -> list[dict]:
+    """Remove exact semantic duplicates produced in one analysis response."""
+    unique_tasks = []
+    seen = set()
+    for task in tasks:
+        key = tuple(
+            " ".join(str(task.get(field, "") or "").split()).casefold()
+            for field in ("task", "assignee", "due", "request")
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_tasks.append(task)
+    return unique_tasks
+
+
 def create_transcript(
     db: Session, current_user: User, masked_content: str, pii_items: list[dict]
 ) -> Transcript:
@@ -141,6 +157,7 @@ def save_analysis(
     embedding,
     chunks: list[dict],
 ):
+    tasks = deduplicate_analysis_tasks(tasks)
     if not transcript.title_is_manual:
         transcript.title = title.strip() or None
     transcript.summary = summary

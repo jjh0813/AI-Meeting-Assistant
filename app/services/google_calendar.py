@@ -3,6 +3,7 @@ import hashlib
 import logging
 import re
 import secrets
+from threading import Lock
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from urllib.parse import quote, urlencode
@@ -10,7 +11,7 @@ from urllib.parse import quote, urlencode
 import httpx
 import jwt
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -21,6 +22,10 @@ from app.services.errors import ExternalServiceError
 from app.services.personalization import is_assigned_to_user, personalize_masked_text
 
 logger = logging.getLogger(__name__)
+
+_SYNC_LOCKS_GUARD = Lock()
+_SYNC_LOCKS: dict[int, Lock] = {}
+_SYNC_ADVISORY_NAMESPACE = 0x4E4F5449
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -539,6 +544,65 @@ def _calendar_request(
         ) from exc
 
 
+def _user_sync_lock(user_id: int) -> Lock:
+    """Return a process-local lock that serializes calendar sync per user."""
+    with _SYNC_LOCKS_GUARD:
+        return _SYNC_LOCKS.setdefault(user_id, Lock())
+
+
+def _acquire_database_sync_lock(db: Session, user_id: int) -> None:
+    """Serialize sync across web workers when PostgreSQL is in use."""
+    bind = db.get_bind()
+    if bind is not None and bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(:namespace, :user_id)"),
+            {"namespace": _SYNC_ADVISORY_NAMESPACE, "user_id": user_id},
+        )
+
+
+def _list_managed_events(
+    db: Session,
+    connection: GoogleCalendarConnection,
+    calendar_id: str,
+    user_id: int,
+) -> dict[int, list[dict]]:
+    """Load Noting-created events once and group them by action item."""
+    grouped: dict[int, list[dict]] = {}
+    page_token: str | None = None
+    while True:
+        params = {
+            "privateExtendedProperty": f"notingUserId={user_id}",
+            "showDeleted": "false",
+            "maxResults": 2500,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        data = _calendar_request(
+            db,
+            connection,
+            "GET",
+            f"/calendars/{quote(calendar_id, safe='')}/events",
+            params=params,
+        )
+        for event in data.get("items", []):
+            private = (
+                event.get("extendedProperties", {}).get("private", {})
+                if isinstance(event, dict)
+                else {}
+            )
+            action_item_id = private.get("notingActionItemId")
+            try:
+                action_item_id = int(action_item_id)
+            except (TypeError, ValueError):
+                continue
+            if event.get("id"):
+                grouped.setdefault(action_item_id, []).append(event)
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
+    return grouped
+
+
 def _personal_sync_tasks(db: Session, user: User):
     rows = (
         db.query(ActionItem, Transcript)
@@ -577,6 +641,12 @@ def _personal_sync_tasks(db: Session, user: User):
 
 
 def sync_user_tasks(db: Session, user: User) -> dict:
+    with _user_sync_lock(user.id):
+        return _sync_user_tasks_locked(db, user)
+
+
+def _sync_user_tasks_locked(db: Session, user: User) -> dict:
+    _acquire_database_sync_lock(db, user.id)
     connection = get_connection(db, user)
     if connection is None:
         raise ExternalServiceError(
@@ -590,8 +660,14 @@ def sync_user_tasks(db: Session, user: User) -> dict:
         .filter(GoogleCalendarEventLink.user_id == user.id)
         .all()
     }
+    managed_events = _list_managed_events(
+        db,
+        connection,
+        selected_calendar,
+        user.id,
+    )
     active_ids = set()
-    created = updated = deleted = delete_failed = 0
+    created = updated = deleted = delete_failed = duplicates_removed = 0
     for item, transcript, pii_entries, due, parsed in _personal_sync_tasks(db, user):
         active_ids.add(item.id)
         title = personalize_masked_text(
@@ -616,38 +692,53 @@ def sync_user_tasks(db: Session, user: User) -> dict:
             user_id=user.id,
         )
         link = links.get(item.id)
-        if link is None:
-            data = _calendar_request(
-                db,
-                connection,
-                "POST",
-                f"/calendars/{quote(selected_calendar, safe='')}/events",
-                json_body=body,
-            )
-            link = GoogleCalendarEventLink(
-                user_id=user.id,
-                action_item_id=item.id,
-                calendar_id=selected_calendar,
-                google_event_id=data["id"],
-                due_snapshot=due,
-                title_snapshot=title,
-            )
-            db.add(link)
-            created += 1
-        elif link.calendar_id != selected_calendar:
+        candidates = managed_events.pop(item.id, [])
+        keeper = next(
+            (
+                event
+                for event in candidates
+                if link is not None and event.get("id") == link.google_event_id
+            ),
+            candidates[0] if candidates else None,
+        )
+        keeper_id = keeper.get("id") if keeper else None
+
+        for duplicate in candidates:
+            duplicate_id = duplicate.get("id")
+            if not duplicate_id or duplicate_id == keeper_id:
+                continue
             try:
                 _calendar_request(
                     db,
                     connection,
                     "DELETE",
-                    f"/calendars/{quote(link.calendar_id, safe='')}/events/"
-                    f"{quote(link.google_event_id, safe='')}",
+                    f"/calendars/{quote(selected_calendar, safe='')}/events/"
+                    f"{quote(duplicate_id, safe='')}",
                 )
             except ExternalServiceError:
-                logger.warning(
-                    "Failed to delete Google event %s while moving calendars",
-                    link.google_event_id,
-                )
+                logger.warning("Failed to delete duplicate Google event %s", duplicate_id)
+                delete_failed += 1
+            else:
+                duplicates_removed += 1
+
+        if keeper is None:
+            if link is not None and link.calendar_id != selected_calendar:
+                try:
+                    _calendar_request(
+                        db,
+                        connection,
+                        "DELETE",
+                        f"/calendars/{quote(link.calendar_id, safe='')}/events/"
+                        f"{quote(link.google_event_id, safe='')}",
+                    )
+                except ExternalServiceError:
+                    logger.warning(
+                        "Failed to delete Google event %s while moving calendars",
+                        link.google_event_id,
+                    )
+                    delete_failed += 1
+                else:
+                    deleted += 1
             data = _calendar_request(
                 db,
                 connection,
@@ -655,49 +746,96 @@ def sync_user_tasks(db: Session, user: User) -> dict:
                 f"/calendars/{quote(selected_calendar, safe='')}/events",
                 json_body=body,
             )
-            link.google_event_id = data["id"]
-            link.calendar_id = selected_calendar
-            link.due_snapshot = due
-            link.title_snapshot = title
-            link.synced_at = datetime.now(timezone.utc)
-            updated += 1
-        elif link.due_snapshot != due or link.title_snapshot != title:
+            if link is None:
+                link = GoogleCalendarEventLink(
+                    user_id=user.id,
+                    action_item_id=item.id,
+                    calendar_id=selected_calendar,
+                    google_event_id=data["id"],
+                    due_snapshot=due,
+                    title_snapshot=title,
+                )
+                db.add(link)
+                links[item.id] = link
+            else:
+                link.google_event_id = data["id"]
+                link.calendar_id = selected_calendar
+                link.due_snapshot = due
+                link.title_snapshot = title
+                link.synced_at = datetime.now(timezone.utc)
+            created += 1
+            continue
+
+        link_changed = (
+            link is None
+            or link.calendar_id != selected_calendar
+            or link.google_event_id != keeper_id
+        )
+        content_changed = (
+            link is None
+            or link.due_snapshot != due
+            or link.title_snapshot != title
+        )
+        if link_changed or content_changed:
             _calendar_request(
                 db,
                 connection,
                 "PUT",
-                f"/calendars/{quote(link.calendar_id, safe='')}/events/"
-                f"{quote(link.google_event_id, safe='')}",
+                f"/calendars/{quote(selected_calendar, safe='')}/events/"
+                f"{quote(keeper_id, safe='')}",
                 json_body=body,
             )
+            updated += 1
+        if link is None:
+            link = GoogleCalendarEventLink(
+                user_id=user.id,
+                action_item_id=item.id,
+                calendar_id=selected_calendar,
+                google_event_id=keeper_id,
+                due_snapshot=due,
+                title_snapshot=title,
+            )
+            db.add(link)
+            links[item.id] = link
+        else:
+            link.google_event_id = keeper_id
             link.calendar_id = selected_calendar
             link.due_snapshot = due
             link.title_snapshot = title
-            link.synced_at = datetime.now(timezone.utc)
-            updated += 1
+            if link_changed or content_changed:
+                link.synced_at = datetime.now(timezone.utc)
+
+    failed_event_ids = set()
+    for stale_events in managed_events.values():
+        for event in stale_events:
+            event_id = event.get("id")
+            if not event_id:
+                continue
+            try:
+                _calendar_request(
+                    db,
+                    connection,
+                    "DELETE",
+                    f"/calendars/{quote(selected_calendar, safe='')}/events/"
+                    f"{quote(event_id, safe='')}",
+                )
+            except ExternalServiceError:
+                logger.warning("Failed to delete stale Google event %s", event_id)
+                failed_event_ids.add(event_id)
+                delete_failed += 1
+            else:
+                deleted += 1
 
     for action_item_id, link in links.items():
-        if action_item_id in active_ids:
-            continue
-        try:
-            _calendar_request(
-                db,
-                connection,
-                "DELETE",
-                f"/calendars/{quote(link.calendar_id, safe='')}/events/"
-                f"{quote(link.google_event_id, safe='')}",
-            )
-        except ExternalServiceError:
-            logger.warning("Failed to delete stale Google event %s", link.google_event_id)
-            delete_failed += 1
+        if action_item_id in active_ids or link.google_event_id in failed_event_ids:
             continue
         db.delete(link)
-        deleted += 1
     db.commit()
     return {
         "created": created,
         "updated": updated,
         "deleted": deleted,
+        "duplicates_removed": duplicates_removed,
         "delete_failed": delete_failed,
         "calendar_id": selected_calendar,
         "reminder_minutes": settings.google_calendar_reminder_minutes,
