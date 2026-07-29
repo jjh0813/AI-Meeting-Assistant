@@ -1247,7 +1247,16 @@ function renderDetailTasks(transcriptId, tasks) {
 function renderScheduleChanges(transcriptId, changes) {
   $("detail-changes-section").classList.toggle("hidden", !changes.length);
   $("detail-changes").innerHTML = changes.map(change => `
-    <div class="schedule-change">${escapeHtml(change.task.task)}<br /><b>${escapeHtml(change.previous_task.due)} → ${escapeHtml(change.task.due)}</b><button type="button" onclick="confirmScheduleChange(${transcriptId},${change.task.id},${change.previous_task.id})">이 일정 변경으로 확정</button></div>
+    <div class="schedule-change">
+      <small>기존 업무</small>
+      <div>${escapeHtml(change.previous_task.task || "업무 항목")}</div>
+      <b>${escapeHtml(change.previous_task.due)}</b>
+      <span class="schedule-change-arrow">↓</span>
+      <small>변경된 업무</small>
+      <div>${escapeHtml(change.task.task || "업무 항목")}</div>
+      <b>${escapeHtml(change.task.due)}</b>
+      <button type="button" onclick="confirmScheduleChange(${transcriptId},${change.task.id},${change.previous_task.id})">이 일정 변경으로 확정</button>
+    </div>
   `).join("");
 }
 

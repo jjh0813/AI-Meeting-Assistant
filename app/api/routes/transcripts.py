@@ -49,6 +49,12 @@ from app.services.retrieval import (
     rerank_sources,
 )
 from app.services.stt import transcribe
+from app.services.task_matching import (
+    MIN_SCHEDULE_VECTOR_SIMILARITY,
+    assignees_match,
+    has_meaningful_due,
+    schedule_match_score,
+)
 
 router = APIRouter(prefix="/transcripts", tags=["transcripts"])
 logger = logging.getLogger(__name__)
@@ -888,12 +894,16 @@ def find_schedule_change_candidates(
         raise HTTPException(status_code=404, detail="회의록을 찾을 수 없습니다.")
 
     items = transcript_repo.get_action_items(db, current_user, transcript_id)
-    candidates = []
+    current_pii = transcript_repo.get_pii_entries(
+        db, current_user, transcript_id
+    )
+    pii_cache = {transcript_id: current_pii}
+    proposals = []
     for item in items:
         if (
             item.status in (ActionItemStatus.completed, ActionItemStatus.superseded)
             or item.task_embedding is None
-            or not item.due.strip()
+            or not has_meaningful_due(item.due)
         ):
             continue
         matches = transcript_repo.search_similar_action_items(
@@ -901,43 +911,106 @@ def find_schedule_change_candidates(
             current_user,
             item.task_embedding,
             exclude_transcript_id=transcript_id,
+            limit=10,
         )
+        item_candidates = []
         for previous, distance in matches:
             similarity = 1 - float(distance)
             if (
-                similarity < MIN_TASK_DUPLICATE_SIMILARITY
-                or (
+                (
                     previous.created_at is not None
                     and item.created_at is not None
                     and previous.created_at >= item.created_at
                 )
-                or not previous.due.strip()
+                or not has_meaningful_due(previous.due)
                 or previous.due.strip() == item.due.strip()
             ):
                 continue
-            candidates.append(
-                {
-                    "task": {
-                        "id": item.id,
-                        "task": item.task,
-                        "assignee": item.assignee,
-                        "due": item.due,
-                    },
-                    "previous_task": {
-                        "id": previous.id,
-                        "transcript_id": previous.transcript_id,
-                        "task": previous.task,
-                        "assignee": previous.assignee,
-                        "due": previous.due,
-                        "status": previous.status.value,
-                    },
-                    "similarity": round(similarity, 4),
-                }
+            if previous.transcript_id not in pii_cache:
+                pii_cache[previous.transcript_id] = (
+                    transcript_repo.get_pii_entries(
+                        db,
+                        current_user,
+                        previous.transcript_id,
+                    )
+                )
+            previous_pii = pii_cache[previous.transcript_id]
+            if not assignees_match(
+                item.assignee,
+                current_pii,
+                previous.assignee,
+                previous_pii,
+                current_user.display_name,
+            ):
+                continue
+            score = schedule_match_score(
+                item.task,
+                item.request,
+                previous.task,
+                previous.request,
+                similarity,
             )
+            if not score.accepted:
+                continue
+            created_timestamp = (
+                previous.created_at.timestamp()
+                if previous.created_at is not None
+                else 0
+            )
+            item_candidates.append(
+                (previous, score, created_timestamp)
+            )
+        if not item_candidates:
+            continue
+        previous, score, created_timestamp = max(
+            item_candidates,
+            key=lambda candidate: (candidate[2], candidate[1].combined_score),
+        )
+        proposals.append(
+            {
+                "task": {
+                    "id": item.id,
+                    "task": item.task,
+                    "assignee": item.assignee,
+                    "due": item.due,
+                },
+                "previous_task": {
+                    "id": previous.id,
+                    "transcript_id": previous.transcript_id,
+                    "task": previous.task,
+                    "assignee": previous.assignee,
+                    "due": previous.due,
+                    "status": previous.status.value,
+                },
+                "similarity": round(score.vector_similarity, 4),
+                "lexical_similarity": round(score.lexical_similarity, 4),
+                "_combined_score": score.combined_score,
+                "_previous_created_at": created_timestamp,
+            }
+        )
+
+    candidates = []
+    used_previous_ids = set()
+    for proposal in sorted(
+        proposals,
+        key=lambda value: (
+            value["_combined_score"],
+            value["_previous_created_at"],
+        ),
+        reverse=True,
+    ):
+        previous_id = proposal["previous_task"]["id"]
+        if previous_id in used_previous_ids:
+            continue
+        used_previous_ids.add(previous_id)
+        proposal.pop("_combined_score")
+        proposal.pop("_previous_created_at")
+        candidates.append(proposal)
+    candidates.sort(key=lambda value: value["task"]["id"])
     return {
         "transcript_id": transcript_id,
         "change_candidates": candidates,
-        "threshold": MIN_TASK_DUPLICATE_SIMILARITY,
+        "threshold": MIN_SCHEDULE_VECTOR_SIMILARITY,
     }
 
 
@@ -976,8 +1049,8 @@ def confirm_task_schedule_change(
     ):
         raise HTTPException(status_code=400, detail="완료되거나 이미 변경된 업무입니다.")
     if (
-        not current_item.due.strip()
-        or not previous_item.due.strip()
+        not has_meaningful_due(current_item.due)
+        or not has_meaningful_due(previous_item.due)
         or current_item.due.strip() == previous_item.due.strip()
     ):
         raise HTTPException(status_code=400, detail="서로 다른 기존·신규 기한이 필요합니다.")
@@ -991,7 +1064,31 @@ def confirm_task_schedule_change(
         previous_item.id,
     )
     similarity = None if distance is None else 1 - distance
-    if similarity is None or similarity < MIN_TASK_DUPLICATE_SIMILARITY:
+    current_pii = transcript_repo.get_pii_entries(
+        db, current_user, current_item.transcript_id
+    )
+    previous_pii = transcript_repo.get_pii_entries(
+        db, current_user, previous_item.transcript_id
+    )
+    same_assignee = assignees_match(
+        current_item.assignee,
+        current_pii,
+        previous_item.assignee,
+        previous_pii,
+        current_user.display_name,
+    )
+    score = (
+        None
+        if similarity is None
+        else schedule_match_score(
+            current_item.task,
+            current_item.request,
+            previous_item.task,
+            previous_item.request,
+            similarity,
+        )
+    )
+    if not same_assignee or score is None or not score.accepted:
         raise HTTPException(status_code=400, detail="일정 변경으로 확인할 만큼 유사한 업무가 아닙니다.")
 
     updated_previous = transcript_repo.confirm_schedule_change(
@@ -1004,6 +1101,7 @@ def confirm_task_schedule_change(
         "new_task_id": current_item.id,
         "new_due": current_item.due,
         "similarity": round(similarity, 4),
+        "lexical_similarity": round(score.lexical_similarity, 4),
         "status": updated_previous.status.value,
     }
 
