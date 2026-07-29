@@ -49,3 +49,23 @@ def test_mcp_transport_security_allows_configured_https_domain():
     assert "noting.kro.kr" in security.allowed_hosts
     assert "https://noting.kro.kr" in security.allowed_origins
     assert "localhost:*" in security.allowed_hosts
+
+
+def test_mcp_exposes_oauth_discovery_and_registration():
+    client = TestClient(app)
+    authorization = client.get("/.well-known/oauth-authorization-server")
+    protected_resource = client.get(
+        "/.well-known/oauth-protected-resource/mcp"
+    )
+
+    assert authorization.status_code == 200
+    metadata = authorization.json()
+    assert metadata["authorization_endpoint"].endswith("/authorize")
+    assert metadata["token_endpoint"].endswith("/token")
+    assert metadata["registration_endpoint"].endswith("/register")
+    assert metadata["code_challenge_methods_supported"] == ["S256"]
+
+    assert protected_resource.status_code == 200
+    resource = protected_resource.json()
+    assert resource["resource"].rstrip("/").endswith("/mcp")
+    assert "noting:read" in resource["scopes_supported"]

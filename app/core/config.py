@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     token_encryption_key: str = ""
     mcp_issuer_url: str = "http://localhost:8000"
     mcp_resource_server_url: str = "http://localhost:8000/mcp"
+    static_asset_base_url: str = ""
+    static_asset_version: str = ""
 
 
 settings = Settings()

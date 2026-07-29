@@ -1,20 +1,28 @@
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-import jwt
 from mcp.server.auth.middleware.auth_context import get_access_token
-from mcp.server.auth.provider import AccessToken, TokenVerifier
-from mcp.server.auth.settings import AuthSettings
+from mcp.server.auth.settings import (
+    AuthSettings,
+    ClientRegistrationOptions,
+    RevocationOptions,
+)
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import AnyHttpUrl
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.core.security import decode_access_token
 from app.models.transcript import ActionItem, ActionItemStatus, Transcript
 from app.models.user import Status, User
 from app.services.google_calendar import list_upcoming_events, sync_user_tasks
+from app.services.mcp_oauth import (
+    CALENDAR_SCOPE,
+    READ_SCOPE,
+    VALID_SCOPES,
+    oauth_consent,
+    oauth_provider,
+)
 from app.services.personalization import is_assigned_to_user, personalize_masked_text
 
 
@@ -42,61 +50,44 @@ def build_transport_security(*urls: str) -> TransportSecuritySettings:
     )
 
 
-class NotingJwtVerifier(TokenVerifier):
-    async def verify_token(self, token: str) -> AccessToken | None:
-        try:
-            payload = decode_access_token(token)
-            username = payload.get("sub")
-            if not username:
-                return None
-        except jwt.PyJWTError:
-            return None
-        db = SessionLocal()
-        try:
-            user = (
-                db.query(User)
-                .filter(User.username == username, User.status == Status.approved)
-                .first()
-            )
-            if user is None:
-                return None
-            expires_at = payload.get("exp")
-            if isinstance(expires_at, datetime):
-                expires_at = int(expires_at.timestamp())
-            elif expires_at is not None:
-                expires_at = int(expires_at)
-            return AccessToken(
-                token=token,
-                client_id="noting-web",
-                scopes=["noting:read", "noting:calendar"],
-                expires_at=expires_at,
-                resource=settings.mcp_resource_server_url,
-                subject=user.username,
-            )
-        finally:
-            db.close()
-
-
 mcp = FastMCP(
     "Noting Meeting Assistant",
     instructions=(
         "Noting 사용자가 소유한 회의록과 개인 업무만 조회합니다. "
         "Google Calendar를 변경하는 도구는 사용자의 명시적인 요청이 있을 때만 호출합니다."
     ),
-    token_verifier=NotingJwtVerifier(),
+    auth_server_provider=oauth_provider,
     auth=AuthSettings(
         issuer_url=AnyHttpUrl(settings.mcp_issuer_url),
         resource_server_url=AnyHttpUrl(settings.mcp_resource_server_url),
-        required_scopes=["noting:read"],
+        service_documentation_url=AnyHttpUrl(
+            f"{settings.mcp_issuer_url.rstrip('/')}/docs"
+        ),
+        client_registration_options=ClientRegistrationOptions(
+            enabled=True,
+            valid_scopes=list(VALID_SCOPES),
+            default_scopes=list(VALID_SCOPES),
+        ),
+        revocation_options=RevocationOptions(enabled=True),
+        required_scopes=[READ_SCOPE],
     ),
     stateless_http=True,
     json_response=True,
-    streamable_http_path="/",
+    streamable_http_path="/mcp",
     transport_security=build_transport_security(
         settings.mcp_issuer_url,
         settings.mcp_resource_server_url,
     ),
 )
+
+
+mcp.custom_route("/oauth/consent", methods=["GET", "POST"])(oauth_consent)
+
+
+def _require_scope(scope: str) -> None:
+    access = get_access_token()
+    if access is None or scope not in access.scopes:
+        raise PermissionError(f"MCP scope '{scope}' 권한이 필요합니다.")
 
 
 def _current_user(db) -> User:
@@ -222,7 +213,8 @@ def get_meeting(meeting_id: int) -> dict:
 
 @mcp.tool()
 def list_calendar_events(days: int = 7) -> dict:
-    """Google Calendar에 동기화된 향후 Noting 일정을 조회합니다."""
+    """현재 사용자의 Google Calendar에서 다가오는 일정을 조회합니다."""
+    _require_scope(CALENDAR_SCOPE)
     db = SessionLocal()
     try:
         user = _current_user(db)
@@ -234,7 +226,8 @@ def list_calendar_events(days: int = 7) -> dict:
 
 @mcp.tool()
 def sync_calendar_tasks() -> dict:
-    """현재 사용자의 Noting 업무를 Google Calendar에 쓰거나 갱신합니다."""
+    """현재 사용자의 미완료 업무를 Google Calendar와 동기화합니다."""
+    _require_scope(CALENDAR_SCOPE)
     db = SessionLocal()
     try:
         user = _current_user(db)

@@ -6,9 +6,11 @@
 
 ### MCP 서버
 
-- 접속 주소: `/mcp/`
+- 접속 주소: `/mcp`
 - 전송 방식: Streamable HTTP
-- 인증 방식: 기존 Noting JWT를 Bearer 토큰으로 사용
+- 인증 방식: OAuth 2.1 Authorization Code + PKCE
+- 클라이언트 등록: OAuth 2.0 Dynamic Client Registration
+- 검색 문서: RFC 8414 Authorization Server Metadata, RFC 9728 Protected Resource Metadata
 - 계정 격리: 토큰의 사용자 계정을 확인한 뒤 해당 사용자가 소유한 회의와 개인 업무만 조회
 - 제공 도구:
   - `search_meetings`: 회의 본문·요약·업무 유사도 검색
@@ -18,7 +20,7 @@
   - `list_calendar_events`: Google Calendar에 동기화한 향후 일정 조회
   - `sync_calendar_tasks`: 본인 업무의 Google Calendar 동기화
 
-MCP 서버는 외부 AI 클라이언트가 Noting의 기능을 표준 도구처럼 호출할 수 있게 한다. 현재 버전은 시연과 내부 연동을 위해 Noting 로그인 JWT를 직접 받는 리소스 서버 방식이다. 공개 서비스에서 범용 MCP 클라이언트의 자동 로그인을 지원하려면 별도의 OAuth Authorization Server와 동적 클라이언트 등록 구성이 추가로 필요하다.
+MCP 서버는 외부 AI 클라이언트가 Noting의 기능을 표준 도구처럼 호출할 수 있게 한다. 클라이언트가 Noting MCP 주소에 연결하면 OAuth 서버를 자동 발견하고 브라우저에 Noting 로그인 승인 화면을 연다. 액세스 토큰은 MCP 리소스 주소, 클라이언트, 사용자와 권한 범위에 묶이며 액세스 토큰은 60분, 회전형 리프레시 토큰은 30일 동안 유효하다.
 
 ### Google Calendar 일정 및 알림
 
@@ -65,7 +67,7 @@ MCP_ISSUER_URL=https://서비스도메인
 MCP_RESOURCE_SERVER_URL=https://서비스도메인/mcp
 ```
 
-`TOKEN_ENCRYPTION_KEY`를 바꾸면 기존에 암호화해 저장한 Google 토큰을 복호화할 수 없다. 변경 시 사용자는 Google Calendar를 다시 연결해야 한다.
+`TOKEN_ENCRYPTION_KEY`를 바꾸면 기존에 암호화해 저장한 Google 토큰과 MCP 클라이언트 비밀값을 복호화할 수 없다. 변경 시 사용자는 Google Calendar를 다시 연결하고, 비밀값을 사용하는 MCP 클라이언트는 다시 등록해야 한다.
 
 ## 4. 데이터베이스와 배포
 
@@ -73,7 +75,8 @@ MCP_RESOURCE_SERVER_URL=https://서비스도메인/mcp
 cd ~/noting
 git pull --ff-only origin main
 uv sync --frozen --no-dev
-uv run python scripts/migrate_google_calendar.py
+uv run python -m scripts.migrate_google_calendar
+uv run python -m scripts.migrate_mcp_oauth
 sudo systemctl restart noting
 sudo systemctl status noting --no-pager
 ```
@@ -82,6 +85,9 @@ sudo systemctl status noting --no-pager
 
 - `google_calendar_connections`: 사용자별 OAuth 연결과 암호화 토큰
 - `google_calendar_event_links`: Noting 업무와 Google 일정의 1:1 연결
+- `mcp_oauth_clients`: 동적으로 등록된 MCP 클라이언트
+- `mcp_oauth_requests`, `mcp_oauth_authorization_codes`: 일회용 로그인 승인 상태
+- `mcp_oauth_access_tokens`, `mcp_oauth_refresh_tokens`: 사용자 귀속·회전·폐기 상태
 
 ## 5. 사용자 동작
 
@@ -98,18 +104,19 @@ Google API 장애가 발생해도 회의 분석이나 업무 변경 자체는 �
 MCP Inspector 같은 Streamable HTTP 클라이언트에서 다음 값을 사용한다.
 
 ```text
-URL: https://서비스도메인/mcp/
-Authorization: Bearer <Noting 로그인 JWT>
+URL: https://서비스도메인/mcp
 ```
 
-현재 Noting JWT의 기본 만료 시간은 60분이다. 만료되면 다시 로그인해 새 토큰을 사용한다. 캘린더 변경 도구인 `sync_calendar_tasks`는 사용자가 동기화를 명시적으로 요청했을 때만 호출한다.
+Authorization 헤더를 수동으로 입력하지 않는다. 클라이언트가 OAuth 검색 문서를 읽고 브라우저를 열면 Noting 아이디와 비밀번호로 로그인해 연결을 승인한다. `noting:read`는 모든 MCP 호출에 필요하고 `list_calendar_events`, `sync_calendar_tasks`는 추가로 `noting:calendar` 권한이 필요하다. 캘린더 변경 도구는 사용자가 동기화를 명시적으로 요청했을 때만 호출한다.
 
 ## 7. 점검 명령
 
 ```bash
 uv run --group dev pytest -q
 node --check app/static/app.js
-curl -i https://서비스도메인/mcp/
+curl -i https://서비스도메인/mcp
+curl -s https://서비스도메인/.well-known/oauth-authorization-server
+curl -s https://서비스도메인/.well-known/oauth-protected-resource/mcp
 ```
 
 인증 없이 MCP 주소를 호출했을 때 `401 Unauthorized`가 반환되는 것이 정상이다.

@@ -97,7 +97,7 @@ LangGraph는 회의 Q&A의 Agentic RAG 흐름에만 사용합니다. 인증·권
 - 같은 부서 사용자라도 다른 계정이 저장한 회의 데이터에는 접근할 수 없습니다.
 - 일반 화면에서는 현재 사용자 본인 이름만 복원하고 다른 이름과 전화번호는 계속 마스킹합니다.
 - LLM과 임베딩 모델에는 번호가 붙은 내부 마스킹 토큰을 사용하며, RAG 답변 시 서버가 본인 이름만 선택적으로 복원합니다.
-- MCP 도구도 전달된 Noting JWT의 사용자를 다시 조회한 후 동일한 계정 소유권 조건을 적용합니다.
+- MCP 도구도 OAuth 2.1로 승인한 Noting 사용자를 다시 조회한 후 동일한 계정 소유권 조건을 적용합니다.
 - Google OAuth 연결과 일정 연결 정보는 사용자별로 분리하고 액세스·갱신 토큰은 암호화해 저장합니다.
 
 현재 계정 격리는 애플리케이션 쿼리 계층에서 수행합니다. 운영 환경에서는 PostgreSQL Row-Level Security, 감사 로그, 비밀 관리 시스템을 추가하는 것을 권장합니다.
@@ -130,7 +130,7 @@ LangGraph는 회의 Q&A의 Agentic RAG 흐름에만 사용합니다. 인증·권
 
 ## MCP 서버
 
-FastAPI 애플리케이션은 `/mcp/`에 stateless Streamable HTTP MCP 서버를 함께 제공합니다. MCP 도구는 별도 데이터 접근 우회 경로를 만들지 않고 기존 서비스와 사용자 소유권 필터를 재사용합니다.
+FastAPI 애플리케이션은 `/mcp`에 stateless Streamable HTTP MCP 서버를 함께 제공합니다. MCP 도구는 별도 데이터 접근 우회 경로를 만들지 않고 기존 서비스와 사용자 소유권 필터를 재사용합니다.
 
 | 도구 | 기능 |
 |---|---|
@@ -141,14 +141,28 @@ FastAPI 애플리케이션은 `/mcp/`에 stateless Streamable HTTP MCP 서버를
 | `list_calendar_events` | Google Calendar에 동기화한 향후 Noting 일정 조회 |
 | `sync_calendar_tasks` | 본인 업무를 Google Calendar에 생성·수정·삭제 동기화 |
 
-현재 MCP 인증은 Noting 로그인에서 발급한 JWT를 Bearer 토큰으로 전달하는 내부 연동 방식입니다.
+MCP 인증은 OAuth 2.1 Authorization Code + PKCE 방식입니다. MCP 클라이언트는 RFC 9728 보호 리소스 문서와 RFC 8414 Authorization Server 문서를 통해 인증 주소를 자동 발견하고, 동적 클라이언트 등록 후 브라우저에서 Noting 계정 로그인을 거칩니다. 발급된 액세스 토큰은 MCP 리소스 주소(audience), 클라이언트, 사용자, 권한 범위에 묶이며 서버 DB에서 폐기 여부를 다시 검사합니다.
 
 ```text
-MCP URL: https://서비스도메인/mcp/
-Authorization: Bearer <Noting JWT>
+MCP URL: https://서비스도메인/mcp
+Protected Resource Metadata:
+  https://서비스도메인/.well-known/oauth-protected-resource/mcp
+Authorization Server Metadata:
+  https://서비스도메인/.well-known/oauth-authorization-server
 ```
 
-JWT 기본 만료 시간은 60분입니다. 범용 MCP 클라이언트에서 로그인과 토큰 발급까지 자동화하려면 향후 별도 OAuth Authorization Server와 동적 클라이언트 등록 구성이 필요합니다.
+액세스 토큰은 60분, 리프레시 토큰은 30일 동안 유효합니다. 리프레시 토큰은 사용할 때마다 회전하며, `/revoke`로 연결을 폐기하면 같은 토큰 패밀리의 액세스·리프레시 토큰을 함께 차단합니다. `noting:read`와 `noting:calendar` 권한을 분리하고 Calendar 조회·동기화 도구는 `noting:calendar` 권한이 있을 때만 실행합니다.
+
+## CDN 정적 자산 전송
+
+HTML과 API는 `noting.kro.kr`에서 계속 제공하고, 변경 빈도가 낮은 `/ui/styles.css`와 `/ui/app.js`만 Naver Cloud Global Edge에서 캐시하도록 구성할 수 있습니다. 별도 도메인을 구매하지 않고 Naver Cloud가 발급하는 `*.edge.naverncp.com` 서비스 도메인을 사용합니다.
+
+- CDN 주소가 비어 있으면 기존 `/ui` 경로에서 동일하게 동작합니다.
+- HTML은 `no-store`로 제공하고 CSS·JS에는 내용 해시 쿼리와 `immutable` 캐시 헤더를 붙입니다.
+- 새 배포로 파일 내용이 바뀌면 해시가 자동 변경되어 이전 CDN 캐시와 충돌하지 않습니다.
+- CDN은 `/ui/styles.css`, `/ui/app.js`만 캐시하고 로그인·회의·MCP·Google OAuth API는 캐시하지 않습니다.
+
+운영 콘솔 설정과 검증 방법은 `deploy/NCP_Global_Edge_CDN_설정_가이드.md`를 따릅니다.
 
 ## Google Calendar 일정 및 알림
 
@@ -186,7 +200,7 @@ JWT 기본 만료 시간은 60분입니다. 범용 MCP 클라이언트에서 로
 │   ├── schemas/                    # API 요청·응답 스키마
 │   ├── services/                   # STT, 마스킹, 분석, 검색, 캘린더, 보고서
 │   ├── static/                     # 브라우저 UI
-│   ├── mcp_server.py               # FastMCP 도구와 Noting JWT 검증
+│   ├── mcp_server.py               # FastMCP 도구, OAuth 2.1 및 권한 범위 검증
 │   └── main.py                     # FastAPI 진입점
 ├── data/
 │   └── templates/                  # 보고서 템플릿
@@ -197,6 +211,7 @@ JWT 기본 만료 시간은 60분입니다. 범용 MCP 클라이언트에서 로
 │   ├── migrate_transcript_titles.py # 자동·수동 회의 제목 증분 마이그레이션
 │   ├── migrate_user_identity_and_ownership.py # 실명·회의 소유권·PII 토큰 마이그레이션
 │   ├── migrate_google_calendar.py  # Google OAuth 연결·일정 링크 테이블
+│   ├── migrate_mcp_oauth.py        # MCP OAuth 클라이언트·코드·토큰 테이블
 │   └── seed_users.py                # 로컬 개발용 사용자 데이터
 ├── tests/                          # 단위 테스트
 ├── .env.example                    # 환경변수 예시
@@ -242,9 +257,11 @@ uv sync
 | `GOOGLE_CALENDAR_REDIRECT_URI` | 캘린더 사용 시 | 빈 값 | Google OAuth 콜백 주소 |
 | `GOOGLE_CALENDAR_TIMEZONE` | 아니요 | `Asia/Seoul` | Google 일정 시간대 |
 | `GOOGLE_CALENDAR_REMINDER_MINUTES` | 아니요 | `1440` | 일정 사전 알림 시간 |
-| `TOKEN_ENCRYPTION_KEY` | 운영 시 권장 | `SECRET_KEY`에서 파생 | 저장된 Google 토큰 암호화 키 |
+| `TOKEN_ENCRYPTION_KEY` | 운영 시 권장 | `SECRET_KEY`에서 파생 | Google 토큰·MCP 클라이언트 비밀값 암호화 키 |
 | `MCP_ISSUER_URL` | MCP 외부 사용 시 | `http://localhost:8000` | MCP 토큰 발급자 식별 URL |
 | `MCP_RESOURCE_SERVER_URL` | MCP 외부 사용 시 | `http://localhost:8000/mcp` | MCP 리소스 서버 URL |
+| `STATIC_ASSET_BASE_URL` | CDN 사용 시 | 빈 값 | Global Edge 정적 자산 기준 URL(`/ui` 포함) |
+| `STATIC_ASSET_VERSION` | 아니요 | 자동 내용 해시 | 수동 캐시 버전 값 |
 
 예시:
 
@@ -271,9 +288,11 @@ TOKEN_ENCRYPTION_KEY=replace-with-a-separate-long-random-value
 
 MCP_ISSUER_URL=https://your-domain.example
 MCP_RESOURCE_SERVER_URL=https://your-domain.example/mcp
+STATIC_ASSET_BASE_URL=https://your-edge-domain.edge.naverncp.com/ui
+STATIC_ASSET_VERSION=
 ```
 
-`TOKEN_ENCRYPTION_KEY`를 변경하면 기존에 저장한 Google OAuth 토큰을 복호화할 수 없으므로 해당 사용자는 Calendar를 다시 연결해야 합니다.
+`TOKEN_ENCRYPTION_KEY`를 변경하면 기존에 저장한 Google OAuth 토큰과 MCP 클라이언트 비밀값을 복호화할 수 없습니다. 해당 사용자는 Calendar를 다시 연결하고, 비밀값을 사용하는 MCP 클라이언트는 다시 등록해야 합니다.
 
 ### 데이터베이스
 
@@ -294,9 +313,12 @@ uv run python scripts/migrate_analysis_jobs.py
 uv run python scripts/migrate_transcript_archive.py
 uv run python -m scripts.migrate_user_identity_and_ownership
 uv run python scripts/migrate_google_calendar.py
+uv run python -m scripts.migrate_mcp_oauth
 ```
 
 `migrate_google_calendar.py`는 기존 `google_calendar_connections` 테이블에 Google 고정 사용자 식별자 컬럼과 인덱스를 추가하고, 로그아웃 상태에서 액세스 토큰을 제거할 수 있도록 해당 컬럼을 nullable로 변경합니다. 운영 서버에서는 애플리케이션을 재시작하기 전에 이 마이그레이션을 먼저 실행해야 합니다.
+
+`migrate_mcp_oauth.py`는 기존 사용자·회의 데이터에 손대지 않고 MCP OAuth 클라이언트, 일회용 승인 요청과 코드, 액세스·리프레시 토큰 상태 테이블만 추가합니다.
 
 로컬 개발용 사용자를 추가할 때:
 
@@ -325,7 +347,7 @@ uv run uvicorn app.main:app --reload
 - Web UI: `http://127.0.0.1:8000/ui/`
 - API 문서: `http://127.0.0.1:8000/docs`
 - Health check: `http://127.0.0.1:8000/health`
-- MCP endpoint: `http://127.0.0.1:8000/mcp/`
+- MCP endpoint: `http://127.0.0.1:8000/mcp`
 
 브라우저 녹음은 보안 컨텍스트가 필요합니다. 로컬에서는 `localhost` 또는 `127.0.0.1`을 사용하고, 운영 환경에서는 HTTPS를 적용해야 합니다.
 
@@ -359,7 +381,13 @@ Google Cloud Console에서는 Google Calendar API를 활성화하고 OAuth 클�
 | `GET` | `/calendar/google/events` | 동기화된 향후 Noting 일정 조회 |
 | `POST` | `/calendar/google/events` | 사용자 요청에 따른 수동 일정 생성 |
 | `DELETE` | `/calendar/google/disconnect` | Google 연결과 저장 토큰 제거 |
-| `POST` | `/mcp/` | MCP Streamable HTTP 메시지 처리 |
+| `POST` | `/mcp` | MCP Streamable HTTP 메시지 처리 |
+| `GET` | `/.well-known/oauth-protected-resource/mcp` | MCP 보호 리소스 검색 문서 |
+| `GET` | `/.well-known/oauth-authorization-server` | OAuth 서버 검색 문서 |
+| `POST` | `/register` | MCP OAuth 동적 클라이언트 등록 |
+| `GET/POST` | `/authorize` | Authorization Code + PKCE 승인 시작 |
+| `POST` | `/token` | 액세스·리프레시 토큰 발급 및 회전 |
+| `POST` | `/revoke` | MCP OAuth 연결 토큰 폐기 |
 
 세부 요청·응답 스키마는 실행 중인 서비스의 `/docs`에서 확인할 수 있습니다.
 
@@ -386,7 +414,7 @@ uv run --group dev pytest -q
 현재 전체 자동 테스트 결과:
 
 ```text
-73 passed
+97 passed
 ```
 
 2026년 7월 23일 로컬 확장 평가 결과:
@@ -412,7 +440,7 @@ uv run --group dev pytest -q
 - 전체 스키마 마이그레이션과 롤백 절차 구축
 - 실제 회의록 기반 검색·마스킹·업무 추출 회귀 평가
 - Google OAuth 운영 승인, 테스트 사용자와 리디렉션 URI 점검
-- MCP 공개 연동 시 OAuth Authorization Server 구성
+- MCP 클라이언트별 실제 연결 호환성 검사와 관리 화면
 - CI에서 단위·통합 테스트 자동 실행
 - 데이터 보존 기간과 PII 삭제 정책 수립
 
@@ -426,7 +454,7 @@ uv run --group dev pytest -q
 - 자동화된 브라우저 E2E 및 외부 STT 통합 테스트는 현재 테스트 범위에 포함되지 않습니다.
 - Google Calendar 연동에는 Google Cloud OAuth 설정, 사용자 동의와 HTTPS 도메인이 필요합니다.
 - 날짜가 불명확한 업무는 Noting에는 저장되지만 Google Calendar에는 자동 등록되지 않습니다.
-- MCP는 현재 Noting JWT 직접 전달 방식이며 범용 클라이언트용 OAuth 로그인 서버는 포함하지 않습니다.
+- MCP OAuth는 동적 클라이언트 등록을 지원하지만, 등록 클라이언트와 사용자별 연결을 조회·강제 폐기하는 관리자 UI는 아직 포함하지 않습니다.
 
 ## 개발 원칙
 

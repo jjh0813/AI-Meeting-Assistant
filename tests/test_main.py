@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -49,6 +50,31 @@ class MainRouteTests(unittest.TestCase):
         self.assertIn('fetch("/calendar/google/disconnect"', script.text)
         self.assertIn("async function logout(disconnectGoogle = true)", script.text)
         self.assertNotIn("계정별 전용 캘린더 설정이 필요합니다.", script.text)
+
+    def test_ui_assets_have_cache_headers_and_content_version(self):
+        response = self.client.get("/ui/styles.css?v=test-version")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("immutable", response.headers["cache-control"])
+        self.assertEqual(response.headers["access-control-allow-origin"], "*")
+
+    def test_ui_can_render_cdn_asset_urls(self):
+        with patch(
+            "app.main.settings.static_asset_base_url",
+            "https://example.edge.naverncp.com/ui",
+        ):
+            response = self.client.get("/ui/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "https://example.edge.naverncp.com/ui/styles.css?v=",
+            response.text,
+        )
+        self.assertIn(
+            "https://example.edge.naverncp.com/ui/app.js?v=",
+            response.text,
+        )
+        self.assertEqual(response.headers["cache-control"], "no-store")
 
     def test_analysis_endpoint_uses_post(self):
         route = next(
